@@ -1,0 +1,29 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build ThiTracNghiem",
+            "type": "shell",
+            "command": "C:\\msys64\\mingw64\\bin\\g++.exe",
+            "args": [
+                "-std=c++17",
+                "-Wall",
+                "-Wextra",
+                "-O2",
+                "*.cpp",
+                "-o",
+                "ThiTracNghiem.exe"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/CMake"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        }
+    ]
+}
