@@ -1,4 +1,3 @@
-// monhoc_avl.h
 #ifndef MONHOC_AVL_H
 #define MONHOC_AVL_H
 
@@ -18,6 +17,9 @@ int update_monhoc_name(PTRMH root, const char* mamh_ci, const char* tenmh);
 
 // Xoá môn học theo mã: Chặn nếu môn còn câu hỏi
 bool delete_monhoc_safe(PTRMH& root, const char* mamh_ci);
+
+// Đếm số môn trong cây AVL
+int dem_monhoc(PTRMH root);
 
 // Duyệt LNR (in-order)
 void traverse_inorder(PTRMH root, void (*visit)(const MonHoc&));
