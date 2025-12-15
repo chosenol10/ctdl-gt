@@ -1,4 +1,4 @@
-// menu.cpp (version toi uu theo UX + AUTO-SAVE + UNDO snapshot toan he thong)
+// menu.cpp (da toi uu: UX + AUTO-SAVE + UNDO + SORT + validate input)
 #include "menu.h"
 #include "fileio.h"
 #include "ds_ops.h"
@@ -41,7 +41,7 @@ static PTRExamLog g_logs          = NULL;
 static bool       g_exit_app      = false;
 static bool       g_has_undo_snap = false;   // da co snapshot cho Undo chua
 
-// Mo ta lan thao tac gan nhat (de show trong bang khi Undo)
+// Mo ta lan thao tac gan nhat (de show khi Undo)
 static char g_last_op_title[64]   = "";
 static char g_last_op_detail[128] = "";
 
@@ -69,7 +69,7 @@ static void load_all() {
     doc_sinhvien_dathi_txt(PATH_SVDT, g_logs, g_dslop);
 }
 
-// ================== UNDO (snapshot) ==================
+// ================== UNDO ==================
 
 static void set_last_op(const char* title, const char* detail) {
     if (!title)  title  = "";
@@ -78,7 +78,7 @@ static void set_last_op(const char* title, const char* detail) {
     std::snprintf(g_last_op_detail, sizeof(g_last_op_detail), "%s", detail);
 }
 
-// Chi luu snapshot, khong hoi han gi ca
+// Chi luu snapshot, khong hoi nguoi dung
 static bool save_undo_snapshot() {
     bool ok = true;
     ok &= ghi_lop_txt(PATH_LOP_BAK, g_dslop);
@@ -88,16 +88,16 @@ static bool save_undo_snapshot() {
     ok &= ghi_sinhvien_dathi_txt(PATH_SVDT_BAK, g_logs);
 
     if (!ok) {
-        printf("Canh bao: Khong tao duoc snapshot hoan tac.\n");
-        printf("Chuc nang UNDO co the khong dung duoc cho lan thay doi nay.\n");
-        // KHONG set g_has_undo_snap = false de giu snapshot cu neu co
+        printf("Canh bao: Khong tao duoc du lieu hoan tac.\n");
+        printf("Lenh Undo co the khong dung duoc cho lan thay doi nay.\n");
+        // khong xoa snapshot cu neu dang co
     } else {
         g_has_undo_snap = true;
     }
     return ok;
 }
 
-// Thuc hien revert ve snapshot (khong hoi han, chi return true/false)
+// Thuc hien revert ve snapshot (khong hoi nguoi dung)
 static bool undo_last_change_raw() {
     if (!g_has_undo_snap) {
         return false;
@@ -116,7 +116,6 @@ static bool undo_last_change_raw() {
     ok &= doc_sinhvien_dathi_txt(PATH_SVDT_BAK, g_logs, g_dslop);
 
     if (ok) {
-        // Sau khi Undo xong thi snapshot nay khong dung lai nua
         g_has_undo_snap = false;
         g_last_op_title[0]   = '\0';
         g_last_op_detail[0]  = '\0';
@@ -124,35 +123,35 @@ static bool undo_last_change_raw() {
     return ok;
 }
 
-// Ham dung trong cac menu con: show bang + confirm + goi undo_raw
+// Ham goi tu menu: show thong tin + confirm + goi undo_raw
 static void menu_undo_action() {
     if (!g_has_undo_snap) {
-        printf("\nChua co thay doi nao de HOAN TAC.\n");
+        printf("\nKhong co thay doi nao de hoan tac.\n");
         system("pause");
         return;
     }
 
-    printf("\n=== PHUC HOI DU LIEU TU SNAPSHOT GAN NHAT (UNDO TOAN HE THONG) ===\n");
-    printf("Luu y: thao tac nay se khoi phuc TOAN BO du lieu Lop, Sinh vien, Mon hoc,\n");
+    printf("\n=== HOAN TAC THAY DOI GAN NHAT (UNDO TOAN HE THONG) ===\n");
+    printf("Lenh nay se dua tat ca du lieu Lop, Sinh vien, Mon hoc,\n");
     printf("Cau hoi va Bai thi ve trang thai truoc lan thay doi gan nhat.\n\n");
     printf("%-10s | %s\n", "THAO TAC",
            (g_last_op_title[0] != '\0') ? g_last_op_title : "(khong ro)");
     printf("%-10s | %s\n", "CHI TIET",
            (g_last_op_detail[0] != '\0') ? g_last_op_detail : "(khong ro)");
-    printf("-----------------------------------------------------------------\n");
+    printf("--------------------------------------------------------\n");
 
-    if (!confirm_dialog("Ban co chac muon HOAN TAC ve trang thai snapshot nay")) {
+    if (!confirm_dialog("Ban co chac muon HOAN TAC ve trang thai nay")) {
         printf("Da huy hoan tac.\n");
         system("pause");
         return;
     }
 
     if (undo_last_change_raw()) {
-        printf("Hoan tac thanh cong. Dang luu lai du lieu sau khi hoan tac...\n");
-        // UNDO cung la mot thay doi => AUTO-SAVE
+        printf("Hoan tac thanh cong.\n");
+        // Undo cung xem nhu 1 thay doi -> Auto save
         save_all();
     } else {
-        printf("Hoan tac that bai (co the file snapshot .bak da bi xoa/hong).\n");
+        printf("Hoan tac that bai (co the file *.bak da bi xoa/hong).\n");
     }
     system("pause");
 }
@@ -183,13 +182,64 @@ static bool read_int(const char* prompt, int& out) {
     return true;
 }
 
-// Xu ly ESC o moi menu: TU DONG LUu + THOAT CHUONG TRINH
-// return true neu da thoat han chuong trinh
+// Xu ly ESC o moi menu: tu dong luu + thoat chuong trinh
 static bool handle_esc_exit() {
-    printf("\nDang luu du lieu truoc khi thoat chuong trinh...\n");
+    printf("\nDang thoat va luu du lieu...\n");
     save_all();
     g_exit_app = true;
     return true;
+}
+
+// ================== Helpers: kiem tra / sort LOP ==================
+
+static int cmp_lop_by_code(const Lop* a, const Lop* b) {
+    return su_stricmp(a->malop, b->malop);
+}
+
+static void swap_lop_ptr(Lop*& a, Lop*& b) {
+    Lop* t = a;
+    a = b;
+    b = t;
+}
+
+static void quicksort_lop(Lop** arr, int left, int right) {
+    if (left >= right) return;
+    int i = left, j = right;
+    Lop* pivot = arr[(left + right) / 2];
+
+    while (i <= j) {
+        while (cmp_lop_by_code(arr[i], pivot) < 0) ++i;
+        while (cmp_lop_by_code(arr[j], pivot) > 0) --j;
+        if (i <= j) {
+            swap_lop_ptr(arr[i], arr[j]);
+            ++i; --j;
+        }
+    }
+    if (left < j)  quicksort_lop(arr, left, j);
+    if (i < right) quicksort_lop(arr, i, right);
+}
+
+// build mang Lop* da sort theo MALOP
+// tra ve so luong; neu 0 thi arr = nullptr
+static int build_sorted_lop_array(const DS_Lop& ds, Lop**& arr) {
+    arr = nullptr;
+    if (ds.n <= 0) return 0;
+
+    int n = ds.n;
+    arr = new Lop*[n];
+    for (int i = 0; i < n; ++i) {
+        arr[i] = ds.nodes[i];
+    }
+    quicksort_lop(arr, 0, n - 1);
+    return n;
+}
+
+// tim index (trong g_dslop.nodes) cua Lop* (de giu nguyen giao dien ham chon lop)
+static int find_lop_index(const DS_Lop& ds, Lop* target) {
+    for (int i = 0; i < ds.n; ++i) {
+        if (ds.nodes[i] == target) return i;
+    }
+    return -1;
 }
 
 // ================== Helpers: bang chon / in LOP ==================
@@ -200,14 +250,23 @@ static void print_ds_lop_overview() {
         return;
     }
 
+    Lop** arr = nullptr;
+    int n = build_sorted_lop_array(g_dslop, arr);
+    if (n <= 0) {
+        printf("\nChua co lop nao.\n");
+        return;
+    }
+
     printf("\n=== DANH SACH LOP ===\n");
     printf("%-4s | %-12s | %-30s | %-4s\n", "STT", "MALOP", "TENLOP", "SV");
     printf("---------------------------------------------------------------\n");
-    for (int i = 0; i < g_dslop.n; ++i) {
-        const Lop* lp = g_dslop.nodes[i];
+    for (int i = 0; i < n; ++i) {
+        const Lop* lp = arr[i];
         printf("%-4d | %-12s | %-30s | %-4d\n",
                i + 1, lp->malop, lp->tenlop, so_sinh_vien_trong_lop(lp));
     }
+
+    delete[] arr;
 }
 
 static int chon_lop_index_tu_bang() {
@@ -217,27 +276,151 @@ static int chon_lop_index_tu_bang() {
         return -1;
     }
 
+    Lop** arr = nullptr;
+    int n = build_sorted_lop_array(g_dslop, arr);
+    if (n <= 0) {
+        printf("\nChua co lop nao. Hay them lop truoc.\n");
+        system("pause");
+        return -1;
+    }
+
     printf("\n=== DANH SACH LOP ===\n");
     printf("%-4s | %-12s | %-30s | %-4s\n", "STT", "MALOP", "TENLOP", "SV");
     printf("---------------------------------------------------------------\n");
-    for (int i = 0; i < g_dslop.n; ++i) {
-        const Lop* lp = g_dslop.nodes[i];
+    for (int i = 0; i < n; ++i) {
+        const Lop* lp = arr[i];
         printf("%-4d | %-12s | %-30s | %-4d\n",
                i + 1, lp->malop, lp->tenlop, so_sinh_vien_trong_lop(lp));
     }
 
     int stt;
     if (!read_int("Nhap STT lop (0 = quay lai): ", stt)) {
+        delete[] arr;
         return -1;
     }
 
-    if (stt == 0) return -1;
-    if (stt < 1 || stt > g_dslop.n) {
-        printf("STT khong hop le.\n");
-        system("pause");
+    if (stt == 0) {
+        delete[] arr;
         return -1;
     }
-    return stt - 1;
+    if (stt < 1 || stt > n) {
+        printf("STT khong hop le.\n");
+        system("pause");
+        delete[] arr;
+        return -1;
+    }
+
+    Lop* chosen = arr[stt - 1];
+    delete[] arr;
+
+    int idx = find_lop_index(g_dslop, chosen);
+    if (idx < 0) {
+        printf("Loi noi bo: khong tim thay lop trong danh sach.\n");
+        system("pause");
+    }
+    return idx;
+}
+
+// ================== Helpers: SORT sinh vien trong 1 lop ==================
+
+// Lay tu cuoi cung trong chuoi (ten goi)
+static void get_last_word(const char* src, char* dst, int dstSize) {
+    if (!src || dstSize <= 0) {
+        if (dstSize > 0) dst[0] = '\0';
+        return;
+    }
+
+    int len = (int)su_strlen(src);
+    int end = len - 1;
+
+    // bo khoang trang cuoi
+    while (end >= 0 && src[end] == ' ') end--;
+    if (end < 0) {
+        dst[0] = '\0';
+        return;
+    }
+
+    int start = end;
+    while (start >= 0 && src[start] != ' ') start--;
+    start++; // sau dau space
+
+    int copyLen = end - start + 1;
+    if (copyLen >= dstSize) copyLen = dstSize - 1;
+    for (int i = 0; i < copyLen; ++i) {
+        dst[i] = src[start + i];
+    }
+    dst[copyLen] = '\0';
+}
+
+// so sanh 2 SV theo "ten goi" (tu cuoi), tiep theo HO TEN day du, cuoi cung MASV
+static int cmp_sv_by_name(PTRSV a, PTRSV b) {
+    char fullA[128], fullB[128];
+    std::snprintf(fullA, sizeof(fullA), "%s %s", a->data.ho, a->data.ten);
+    std::snprintf(fullB, sizeof(fullB), "%s %s", b->data.ho, b->data.ten);
+
+    char lastA[64], lastB[64];
+    get_last_word(fullA, lastA, sizeof(lastA));
+    get_last_word(fullB, lastB, sizeof(lastB));
+
+    int c = su_stricmp(lastA, lastB);
+    if (c != 0) return c;
+
+    c = su_stricmp(fullA, fullB);
+    if (c != 0) return c;
+
+    return su_stricmp(a->data.masv, b->data.masv);
+}
+
+static void swap_sv_ptr(PTRSV &a, PTRSV &b) {
+    PTRSV t = a;
+    a = b;
+    b = t;
+}
+
+static void quicksort_sv(PTRSV *arr, int left, int right) {
+    if (left >= right) return;
+    int i = left, j = right;
+    PTRSV pivot = arr[(left + right) / 2];
+
+    while (i <= j) {
+        while (cmp_sv_by_name(arr[i], pivot) < 0) ++i;
+        while (cmp_sv_by_name(arr[j], pivot) > 0) --j;
+        if (i <= j) {
+            swap_sv_ptr(arr[i], arr[j]);
+            ++i; --j;
+        }
+    }
+    if (left < j)  quicksort_sv(arr, left, j);
+    if (i < right) quicksort_sv(arr, i, right);
+}
+
+// build mang SV da sort theo TEN goi / HO / MASV
+static int build_sorted_sv_array(Lop *lop, PTRSV *&arr) {
+    arr = nullptr;
+    if (!lop || !lop->FirstSV) return 0;
+
+    int n = dem_sv(lop->FirstSV);
+    if (n <= 0) return 0;
+
+    arr = new PTRSV[n];
+    int idx = 0;
+    for (PTRSV p = lop->FirstSV; p; p = p->next) {
+        arr[idx++] = p;
+    }
+
+    quicksort_sv(arr, 0, n - 1);
+    return n;
+}
+
+// kiem tra MASV da ton tai trong toan he thong (case-insensitive)
+static bool masv_exists_in_system(const char* masv_ci) {
+    for (int i = 0; i < g_dslop.n; ++i) {
+        Lop* lop = g_dslop.nodes[i];
+        for (PTRSV p = lop->FirstSV; p; p = p->next) {
+            if (su_stricmp(p->data.masv, masv_ci) == 0) return true;
+        }
+    }
+    return false;
 }
 
 // ================== Helpers: bang chon SINH VIEN ==================
@@ -249,26 +432,29 @@ static PTRSV chon_sv_trong_lop(Lop* lop) {
         return NULL;
     }
 
-    int n = dem_sv(lop->FirstSV);
-    PTRSV* arr = new PTRSV[n];
+    PTRSV *arr = nullptr;
+    int n = build_sorted_sv_array(lop, arr);
+    if (n <= 0) {
+        printf("\nLop chua co sinh vien nao.\n");
+        system("pause");
+        return NULL;
+    }
 
     printf("\n=== DS SINH VIEN CUA LOP %s - %s ===\n", lop->malop, lop->tenlop);
     printf("%-4s | %-12s | %-20s | %-4s | %-8s\n",
            "STT", "MASV", "HO TEN", "PHAI", "Mon thi");
     printf("---------------------------------------------------------------------\n");
 
-    int idx = 0;
-    for (PTRSV p = lop->FirstSV; p; p = p->next) {
-        arr[idx] = p;
+    for (int i = 0; i < n; ++i) {
+        PTRSV p = arr[i];
         char hoten[80];
         std::snprintf(hoten, sizeof(hoten), "%s %s", p->data.ho, p->data.ten);
         printf("%-4d | %-12s | %-20s | %-4s | %-8d\n",
-               idx + 1,
+               i + 1,
                p->data.masv,
                hoten,
                p->data.phai,
                dem_diem(p->data.ds_diemthi));
-        ++idx;
     }
 
     int stt;
@@ -298,22 +484,32 @@ static void in_ds_sv_cua_lop(Lop* lop) {
         printf("\nLop chua co sinh vien nao.\n");
         return;
     }
+
+    PTRSV *arr = nullptr;
+    int n = build_sorted_sv_array(lop, arr);
+    if (n <= 0) {
+        printf("\nLop chua co sinh vien nao.\n");
+        return;
+    }
+
     printf("\n=== DS SINH VIEN CUA LOP %s - %s ===\n", lop->malop, lop->tenlop);
     printf("%-4s | %-12s | %-20s | %-4s | %-8s\n",
            "STT", "MASV", "HO TEN", "PHAI", "Mon thi");
     printf("---------------------------------------------------------------------\n");
 
-    int idx = 0;
-    for (PTRSV p = lop->FirstSV; p; p = p->next) {
+    for (int i = 0; i < n; ++i) {
+        PTRSV p = arr[i];
         char hoten[80];
         std::snprintf(hoten, sizeof(hoten), "%s %s", p->data.ho, p->data.ten);
         printf("%-4d | %-12s | %-20s | %-4s | %-8d\n",
-               ++idx,
+               i + 1,
                p->data.masv,
                hoten,
                p->data.phai,
                dem_diem(p->data.ds_diemthi));
     }
+
+    delete[] arr;
 }
 
 // ================== Helpers: bang chon / in MON HOC ==================
@@ -358,7 +554,7 @@ static void print_ds_monhoc_overview(PTRMH root) {
     delete[] arr;
 }
 
-// Chon mon tu cay bang STT, tra mamh vao mamh_out (C15), return true neu OK
+// Chon mon tu cay bang STT, tra mamh vao mamh_out, return true neu OK
 static bool chon_monhoc_tu_cay(PTRMH root, char* mamh_out) {
     if (!root) {
         printf("\nChua co mon hoc nao. Hay them mon truoc.\n");
@@ -477,7 +673,7 @@ static void menu_quanly_lop() {
         printf("1. Them lop\n");
         printf("2. Xoa lop\n");
         printf("3. In lai danh sach lop\n");
-        printf("4. Undo\n");
+        printf("4. Hoan tac thay doi gan nhat (Undo)\n");
         printf("5. Quay lai\n");
         printf("(ESC: Thoat chuong trinh)\n");
         printf("Chon: ");
@@ -492,10 +688,21 @@ static void menu_quanly_lop() {
             char ml[64], tl[128];
             printf("\nNhap MA LOP (toi da 15 ky tu, chi A-Z, 0-9, khong cach. VD: N24DCCN01): ");
             std::fgets(ml, sizeof(ml), stdin); chomp_line(ml);
-            normalize_code(ml); // tu dong chuan hoa ma lop
+            normalize_code(ml);
+
+            if (su_strlen(ml) == 0) {
+                printf("Loi: MA LOP khong duoc rong.\n");
+                system("pause");
+                continue;
+            }
 
             printf("Nhap TEN LOP: ");
             std::fgets(tl, sizeof(tl), stdin); chomp_line(tl);
+            if (su_strlen(tl) == 0) {
+                printf("Loi: TEN LOP khong duoc rong.\n");
+                system("pause");
+                continue;
+            }
 
             // Snapshot truoc khi them
             save_undo_snapshot();
@@ -506,7 +713,6 @@ static void menu_quanly_lop() {
                 std::snprintf(detail, sizeof(detail), "Ma lop: %s | Ten lop: %s", ml, tl);
                 set_last_op("Them lop", detail);
                 printf("Da them lop thanh cong.\n");
-                // AUTO-SAVE
                 save_all();
             } else if (r == 1) {
                 printf("Loi: MA LOP da ton tai. Vui long chon ma khac.\n");
@@ -518,7 +724,7 @@ static void menu_quanly_lop() {
                 printf("Them lop that bai (code=%d).\n", r);
             }
             system("pause");
-        } 
+        }
         else if (key == '2') {
             int idx = chon_lop_index_tu_bang();
             if (idx < 0) continue;
@@ -532,19 +738,17 @@ static void menu_quanly_lop() {
             printf("Luu y: se KHONG XOA neu lop con sinh vien da thi.\n");
             if (!confirm_dialog("Ban chac chan xoa lop nay")) continue;
 
-            // Snapshot truoc khi xoa
             save_undo_snapshot();
 
             if (xoa_lop(g_dslop, lp->malop)) {
                 set_last_op("Xoa lop", detail);
                 printf("Da xoa lop.\n");
-                // AUTO-SAVE
                 save_all();
             } else {
                 printf("Khong the xoa lop: hoac lop khong ton tai, hoac co SV da thi.\n");
             }
             system("pause");
-        } 
+        }
         else if (key == '3') {
             clearScreen();
             printf("=== DANH SACH LOP (CAP NHAT) ===\n");
@@ -573,7 +777,7 @@ static void menu_quanly_sv() {
         printf("2. Sua SV\n");
         printf("3. Xoa SV\n");
         printf("4. In DS SV cua 1 lop\n");
-        printf("5. Undo\n");
+        printf("5. Hoan tac thay doi gan nhat (Undo)\n");
         printf("6. Quay lai\n");
         printf("(ESC: Thoat chuong trinh)\n");
         printf("Chon: ");
@@ -597,14 +801,51 @@ static void menu_quanly_sv() {
             std::fgets(ms, sizeof(ms), stdin); chomp_line(ms);
             normalize_code(ms);
 
+            if (su_strlen(ms) == 0) {
+                printf("Loi: MASV khong duoc rong.\n");
+                system("pause");
+                continue;
+            }
+
+            if (masv_exists_in_system(ms)) {
+                printf("Loi: MASV da ton tai trong toan he thong.\n");
+                system("pause");
+                continue;
+            }
+
             printf("Ho: ");
             std::fgets(ho, sizeof(ho), stdin); chomp_line(ho);
+            if (su_strlen(ho) == 0) {
+                printf("Loi: Ho khong duoc rong.\n");
+                system("pause");
+                continue;
+            }
+
             printf("Ten: ");
             std::fgets(ten, sizeof(ten), stdin); chomp_line(ten);
+            if (su_strlen(ten) == 0) {
+                printf("Loi: Ten khong duoc rong.\n");
+                system("pause");
+                continue;
+            }
+
             printf("Phai (NAM/NU): ");
             std::fgets(phai, sizeof(phai), stdin); chomp_line(phai);
+
+            if (!(su_stricmp(phai, "NAM") == 0 || su_stricmp(phai, "NU") == 0)) {
+                printf("Loi: PHAI chi chap nhan 'NAM' hoac 'NU'.\n");
+                system("pause");
+                continue;
+            }
+
             printf("Password (4-20 ky tu): ");
             std::fgets(pw, sizeof(pw), stdin); chomp_line(pw);
+            int lenpw = (int)su_strlen(pw);
+            if (lenpw < 4 || lenpw > 20) {
+                printf("Loi: PASSWORD phai co do dai tu 4 den 20 ky tu.\n");
+                system("pause");
+                continue;
+            }
 
             // Snapshot truoc khi them SV
             save_undo_snapshot();
@@ -617,7 +858,6 @@ static void menu_quanly_sv() {
                               lop->malop, ms, ho, ten);
                 set_last_op("Them sinh vien", detail);
                 printf("Da them sinh vien thanh cong.\n");
-                // AUTO-SAVE
                 save_all();
             } else if (r == 1) {
                 printf("Loi: Khong tim thay lop (co the lop da bi xoa).\n");
@@ -625,15 +865,14 @@ static void menu_quanly_sv() {
                 printf("Loi: MASV da ton tai trong toan bo he thong.\n");
             } else if (r == 3) {
                 printf("Loi: Du lieu sinh vien khong hop le.\n");
-                printf("- Kiem tra lai:\n");
-                printf("  + MASV chi gom A-Z, 0-9, khong rong.\n");
-                printf("  + PHAI phai la 'NAM' hoac 'NU'.\n");
-                printf("  + PASSWORD do dai tu 4 den 20 ky tu.\n");
+                printf("- MASV chi gom A-Z, 0-9, khong rong.\n");
+                printf("- PHAI phai la 'NAM' hoac 'NU'.\n");
+                printf("- PASSWORD do dai tu 4 den 20 ky tu.\n");
             } else {
                 printf("Them sinh vien that bai (code=%d).\n", r);
             }
             system("pause");
-        } 
+        }
         // --- 2. Sua SV ---
         else if (key == '2') {
             int idxLop = chon_lop_index_tu_bang();
@@ -670,7 +909,6 @@ static void menu_quanly_sv() {
             std::fgets(pw, sizeof(pw), stdin); chomp_line(pw);
             if (su_strlen(pw) == 0) su_strcpy(pw, sv->data.password);
 
-            // Snapshot truoc khi sua
             save_undo_snapshot();
 
             int r = sua_sv_trong_lop(lop, sv->data.masv, ho, ten, phai, pw);
@@ -681,7 +919,6 @@ static void menu_quanly_sv() {
                               sv->data.masv, ho_cu, ten_cu, ho, ten, phai_cu, phai);
                 set_last_op("Sua sinh vien", detail);
                 printf("Da cap nhat thong tin sinh vien.\n");
-                // AUTO-SAVE
                 save_all();
             } else if (r == 1) {
                 printf("Loi: Khong tim thay sinh vien trong lop.\n");
@@ -693,7 +930,7 @@ static void menu_quanly_sv() {
                 printf("Sua sinh vien that bai (code=%d).\n", r);
             }
             system("pause");
-        } 
+        }
         // --- 3. Xoa SV ---
         else if (key == '3') {
             int idxLop = chon_lop_index_tu_bang();
@@ -711,23 +948,19 @@ static void menu_quanly_sv() {
             printf("\nBan dang chon xoa SV: %s - %s %s\n",
                    sv->data.masv, sv->data.ho, sv->data.ten);
             printf("Luu y: se KHONG xoa duoc neu SV da co diem/bai thi.\n");
-            if (!confirm_dialog("Xoa sinh vien nay?")) { 
-                continue; 
-            }
+            if (!confirm_dialog("Xoa sinh vien nay?")) continue;
 
-            // Snapshot truoc khi xoa
             save_undo_snapshot();
 
             if (xoa_sv_khoi_lop(lop, sv->data.masv)) {
                 set_last_op("Xoa sinh vien", detail);
                 printf("Da xoa sinh vien.\n");
-                // AUTO-SAVE
                 save_all();
             } else {
                 printf("Khong xoa duoc: SV co diem/bai thi hoac khong ton tai.\n");
             }
             system("pause");
-        } 
+        }
         // --- 4. In SV cua lop ---
         else if (key == '4') {
             int idxLop = chon_lop_index_tu_bang();
@@ -737,7 +970,7 @@ static void menu_quanly_sv() {
             clearScreen();
             in_ds_sv_cua_lop(lop);
             system("pause");
-        } 
+        }
         else if (key == '5') {
             menu_undo_action();
         }
@@ -758,7 +991,7 @@ static void menu_quanly_monhoc() {
         printf("1. Them mon hoc\n");
         printf("2. Sua ten mon hoc\n");
         printf("3. Xoa mon hoc (chan neu con cau hoi)\n");
-        printf("4. Undo\n");
+        printf("4. Hoan tac thay doi gan nhat (Undo)\n");
         printf("5. Quay lai\n");
         printf("(ESC: Thoat chuong trinh)\n");
         printf("Chon: ");
@@ -775,10 +1008,20 @@ static void menu_quanly_monhoc() {
             std::fgets(mm, sizeof(mm), stdin); chomp_line(mm);
             normalize_code(mm);
 
+            if (su_strlen(mm) == 0) {
+                printf("Loi: Ma mon hoc khong duoc rong.\n");
+                system("pause");
+                continue;
+            }
+
             printf("Ten MH: ");
             std::fgets(tn, sizeof(tn), stdin); chomp_line(tn);
+            if (su_strlen(tn) == 0) {
+                printf("Loi: Ten mon hoc khong duoc rong.\n");
+                system("pause");
+                continue;
+            }
 
-            // Snapshot truoc khi them
             save_undo_snapshot();
 
             int r = insert_monhoc(g_rootMH, mm, tn);
@@ -788,7 +1031,6 @@ static void menu_quanly_monhoc() {
                               "Ma MH: %s | Ten MH: %s", mm, tn);
                 set_last_op("Them mon hoc", detail);
                 printf("Da them mon hoc.\n");
-                // AUTO-SAVE
                 save_all();
             } else if (r == 1) {
                 printf("Loi: Ma mon hoc da ton tai.\n");
@@ -798,7 +1040,7 @@ static void menu_quanly_monhoc() {
                 printf("Them mon hoc that bai (code=%d).\n", r);
             }
             system("pause");
-        } 
+        }
         else if (key == '2') {
             char mamh[16];
             if (!chon_monhoc_tu_cay(g_rootMH, mamh)) continue;
@@ -811,8 +1053,12 @@ static void menu_quanly_monhoc() {
             char tn[128];
             printf("\nTen MH moi: ");
             std::fgets(tn, sizeof(tn), stdin); chomp_line(tn);
+            if (su_strlen(tn) == 0) {
+                printf("Loi: Ten mon hoc khong duoc rong.\n");
+                system("pause");
+                continue;
+            }
 
-            // Snapshot truoc khi sua
             save_undo_snapshot();
 
             int r = update_monhoc_name(g_rootMH, mamh, tn);
@@ -822,13 +1068,12 @@ static void menu_quanly_monhoc() {
                               "MAMH: %s | Ten: '%s' -> '%s'", mamh, ten_cu, tn);
                 set_last_op("Sua ten mon hoc", detail);
                 printf("Da cap nhat ten mon hoc.\n");
-                // AUTO-SAVE
                 save_all();
             } else {
                 printf("Khong tim thay mon hoc.\n");
             }
             system("pause");
-        } 
+        }
         else if (key == '3') {
             char mamh[16];
             if (!chon_monhoc_tu_cay(g_rootMH, mamh)) continue;
@@ -843,19 +1088,17 @@ static void menu_quanly_monhoc() {
             printf("Luu y: SE KHONG XOA neu mon con cau hoi.\n");
             if (!confirm_dialog("Xac nhan xoa mon hoc nay")) continue;
 
-            // Snapshot truoc khi xoa
             save_undo_snapshot();
 
             if (delete_monhoc_safe(g_rootMH, mamh)) {
                 set_last_op("Xoa mon hoc", detail);
                 printf("Da xoa mon hoc.\n");
-                // AUTO-SAVE
                 save_all();
             } else {
                 printf("Khong the xoa (mon khong ton tai hoac con cau hoi).\n");
             }
             system("pause");
-        } 
+        }
         else if (key == '4') {
             menu_undo_action();
         }
@@ -877,7 +1120,7 @@ static void menu_quanly_cauhoi() {
         printf("1. Them cau hoi\n");
         printf("2. Xoa cau hoi (chan neu da thi)\n");
         printf("3. In ds cau cua 1 mon\n");
-        printf("4. Undo\n");
+        printf("4. Hoan tac thay doi gan nhat (Undo)\n");
         printf("5. Quay lai\n");
         printf("(ESC: Thoat chuong trinh)\n");
         printf("Chon: ");
@@ -894,7 +1137,6 @@ static void menu_quanly_cauhoi() {
             PTRMH mh = find_monhoc(g_rootMH, mamh);
             if (!mh) { printf("Khong tim thay mon hoc.\n"); system("pause"); continue; }
 
-            // Snapshot truoc khi them cau
             save_undo_snapshot();
 
             CauHoi ch;
@@ -902,6 +1144,12 @@ static void menu_quanly_cauhoi() {
 
             printf("\nNhap noi dung cau hoi:\n");
             std::fgets(ch.noidung, sizeof(ch.noidung), stdin); chomp_line(ch.noidung);
+            if (su_strlen(ch.noidung) == 0) {
+                printf("Loi: Noi dung cau hoi khong duoc rong.\n");
+                system("pause");
+                continue;
+            }
+
             printf("Phuong an A: "); std::fgets(ch.A, sizeof(ch.A), stdin); chomp_line(ch.A);
             printf("Phuong an B: "); std::fgets(ch.B, sizeof(ch.B), stdin); chomp_line(ch.B);
             printf("Phuong an C: "); std::fgets(ch.C, sizeof(ch.C), stdin); chomp_line(ch.C);
@@ -918,7 +1166,6 @@ static void menu_quanly_cauhoi() {
             add_cau_hoi(mh->data.FirstCHT, ch);
 
             char detail[128];
-            // cat ngan noi dung cho gon
             char noidung_short[40];
             std::snprintf(noidung_short, sizeof(noidung_short), "%.35s%s",
                           ch.noidung, (su_strlen(ch.noidung) > 35) ? "..." : "");
@@ -928,10 +1175,9 @@ static void menu_quanly_cauhoi() {
             set_last_op("Them cau hoi", detail);
 
             printf("Da them cau hoi (id=%d) vao mon %s.\n", ch.id, mh->data.mamh);
-            // AUTO-SAVE
             save_all();
             system("pause");
-        } 
+        }
         else if (key == '2') {
             char mamh[16];
             if (!chon_monhoc_tu_cay(g_rootMH, mamh)) continue;
@@ -943,7 +1189,6 @@ static void menu_quanly_cauhoi() {
             std::fgets(idbuf, sizeof(idbuf), stdin); chomp_line(idbuf);
             int id = std::atoi(idbuf);
 
-            // tim cau hoi de mo ta
             PTRCH q = mh->data.FirstCHT;
             while (q && q->data.id != id) q = q->next;
 
@@ -961,27 +1206,25 @@ static void menu_quanly_cauhoi() {
             }
 
             if (examlog_contains_question(g_logs, mamh, id)) {
-                printf("Khong the xoa: cau hoi da duoc dung trong bai thi cua sinh vien.\n");
+                printf("Khong the xoa: cau hoi da duoc dung trong bai thi.\n");
             } else {
                 if (!confirm_dialog("Xac nhan xoa cau hoi nay")) {
                     system("pause");
                     continue;
                 }
 
-                // Snapshot truoc khi xoa
                 save_undo_snapshot();
 
                 if (remove_cau_by_id(mh->data.FirstCHT, id)) {
                     set_last_op("Xoa cau hoi", detail);
                     printf("Da xoa cau hoi.\n");
-                    // AUTO-SAVE
                     save_all();
                 } else {
                     printf("Khong tim thay cau hoi co ID do.\n");
                 }
             }
             system("pause");
-        } 
+        }
         else if (key == '3') {
             char mamh[16];
             if (!chon_monhoc_tu_cay(g_rootMH, mamh)) continue;
@@ -993,7 +1236,7 @@ static void menu_quanly_cauhoi() {
                 printf("ID=%d | %s (DA: %c)\n", p->data.id, p->data.noidung, p->data.dapan);
             }
             system("pause");
-        } 
+        }
         else if (key == '4') {
             menu_undo_action();
         }
@@ -1037,7 +1280,7 @@ static void menu_thi_sv() {
 
     if (!foundMasv) {
         printf("Ma sinh vien khong ton tai trong he thong.\n");
-        printf("Vui long kiem tra lai MASV hoac lien he giang vien de duoc cap tai khoan.\n");
+        printf("Vui long kiem tra lai MASV hoac lien he giang vien.\n");
         system("pause");
         return;
     }
@@ -1116,12 +1359,11 @@ static void menu_thi_sv() {
             else if (r == 3) printf("Loi: So cau thi khong hop le (phai > 0).\n");
             else if (r == 4) printf("Loi: Mon hoc khong du so cau yeu cau.\n");
             else if (r == 0) {
-                // Thi thanh cong, ket qua da luu vao cau truc => AUTO-SAVE TOAN HE THONG
                 printf("Da ket thuc bai thi.\n");
                 save_all();
             }
             system("pause");
-        } 
+        }
         else if (key == '2') {
             printf("\n=== DIEM CUA BAN ===\n");
             if (!sv->data.ds_diemthi) {
@@ -1134,7 +1376,7 @@ static void menu_thi_sv() {
                 }
             }
             system("pause");
-        } 
+        }
         else if (key == '3') {
             char mamh[16];
             if (!chon_mon_da_thi_cua_sv(g_logs, sv->data.masv, mamh, 16)) {
@@ -1143,7 +1385,7 @@ static void menu_thi_sv() {
             }
             in_chi_tiet_bai_thi(g_logs, sv->data.masv, mamh);
             system("pause");
-        } 
+        }
         else if (key == '4') {
             return;
         }
@@ -1160,8 +1402,8 @@ static void menu_gv() {
         printf("2. Quan ly Sinh Vien\n");
         printf("3. Quan ly Mon hoc\n");
         printf("4. Quan ly Cau hoi\n");
-        printf("5. In bang diem 1 lop\n");
-        printf("6. Quay lai\n");
+        printf("5. Quay lai\n");
+        printf("(ESC: Thoat chuong trinh)\n");
         printf("Chon: ");
 
         int key = wait_key();
@@ -1174,33 +1416,7 @@ static void menu_gv() {
         else if (key == '2') menu_quanly_sv();
         else if (key == '3') menu_quanly_monhoc();
         else if (key == '4') menu_quanly_cauhoi();
-        else if (key == '5') {
-            int idxLop = chon_lop_index_tu_bang();
-            if (idxLop < 0) continue;
-            Lop* lop = g_dslop.nodes[idxLop];
-            in_bang_diem_lop(g_dslop, lop->malop, g_rootMH);
-            system("pause");
-        }
-        else if (key == '7') {
-            printf("\nDang luu du lieu...\n");
-            save_all();
-            system("pause");
-        }
-        else if (key == '8') {
-            if (confirm_dialog("Nap lai du lieu tu file TXT va GHI DE du lieu hien tai?")) {
-                // Snapshot truoc khi nap lai
-                save_undo_snapshot();
-
-                load_all();
-                set_last_op("Nap lai du lieu tu TXT",
-                            "Nap toan bo du lieu tu cac file TXT, ghi de du lieu dang co.");
-                printf("\nDa nap lai du lieu tu file.\n");
-            } else {
-                printf("\nDa huy thao tac nap lai.\n");
-            }
-            system("pause");
-        }
-        else if (key == '6') return;
+        else if (key == '5') return;
     }
 }
 
@@ -1225,7 +1441,7 @@ void run_console_app() {
 
         int key = wait_key();
 
-        // ESC hoac 3 => THOAT CHUONG TRINH + AUTO-SAVE, KHONG HOI LUU
+        // ESC hoac 3 => THOAT CHUONG TRINH + AUTO-SAVE
         if (key == KEY_ESC || key == '3') {
             handle_esc_exit();
             break;
