@@ -42,21 +42,21 @@ D
 N24DECE019
 4
 123
-113945
-1 + 1 =
-2
-3
-4
-5
-A
-A
-123
 126297
 cpp la ngon ngu lap trinh
 c++
 python
 js
 html/css
+A
+A
+123
+113945
+1 + 1 =
+2
+3
+4
+5
 A
 A
 123

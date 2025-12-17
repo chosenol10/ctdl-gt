@@ -20,7 +20,7 @@ int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
 // In chi tiết bài thi của 1 SV/môn (nếu có)
 void in_chi_tiet_bai_thi(PTRExamLog logs, const char* masv_ci, const char* mamh_ci);
 
-// In bảng điểm của 1 lớp theo từng môn trong cây (nếu SV chưa thi môn X -> "CHUA THI")
+// In bảng điểm của 1 lớp theo từng môn trong cây (nếu SV chưa thi môn X -> "CHUA")
 void in_bang_diem_lop(const DS_Lop& ds, const char* malop_ci, PTRMH root);
 
 #endif // THI_H

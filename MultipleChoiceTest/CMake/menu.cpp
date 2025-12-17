@@ -53,7 +53,6 @@ static void save_all() {
     if (!ghi_monhoc_txt(PATH_MON, g_rootMH))        printf("Loi ghi %s\n", PATH_MON);
     if (!ghi_cauhoi_txt(PATH_CH, g_rootMH))         printf("Loi ghi %s\n", PATH_CH);
     if (!ghi_sinhvien_dathi_txt(PATH_SVDT, g_logs)) printf("Loi ghi %s\n", PATH_SVDT);
-    printf("Da luu du lieu.\n");
 }
 
 static void load_all() {

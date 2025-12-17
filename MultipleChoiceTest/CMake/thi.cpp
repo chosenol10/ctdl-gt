@@ -1,4 +1,5 @@
-// thi.cpp (toi uu UX + canh bao thi lai + in ro dung/sai + thanh trang thai dap an)
+// thi.cpp (thi tiep tuc khi bi vang + thanh trang thai dap an + canh bao thi lai)
+
 #include "thi.h"
 #include "ds_ops.h"
 #include "cauhoi.h"
@@ -86,8 +87,131 @@ static void draw_answer_bar(const ExamQItem* items, int soCau, int curIdx) {
     printf("   ");
 }
 
-// ================== THUC HIEN THI TRAC NGHIEM ==================
+// ================== LUU / TAI BAI THI DANG LAM ==================
+//
+// File: InProgress_<MASV>_<MAMH>.txt
+// Dong 1: soCau remainSec curIdx
+// Dong 2..: id da_chon
+//
 
+static void build_inprogress_filename(const char* masv_ci,
+                                      const char* mamh_ci,
+                                      char* out, int outSize) {
+    if (!out || outSize <= 0) return;
+    std::snprintf(out, outSize, "InProgress_%s_%s.txt", masv_ci, mamh_ci);
+}
+
+static bool save_inprogress_exam(const char* masv_ci, const char* mamh_ci,
+                                 const ExamQItem* items, int soCau,
+                                 int curIdx, int remainSec) {
+    if (!items || soCau <= 0) return false;
+
+    char path[256];
+    build_inprogress_filename(masv_ci, mamh_ci, path, sizeof(path));
+
+    FILE* f = std::fopen(path, "wt");
+    if (!f) return false;
+
+    std::fprintf(f, "%d %d %d\n", soCau, remainSec, curIdx);
+    for (int i = 0; i < soCau; ++i) {
+        char c = items[i].da_chon;
+        if (!(c == 'A' || c == 'B' || c == 'C' || c == 'D')) c = '?';
+        std::fprintf(f, "%d %c\n", items[i].id, c);
+    }
+
+    std::fclose(f);
+    return true;
+}
+
+// Tai full bai thi dang lam: reconstruct ExamQItem tu cay cau hoi
+static bool load_inprogress_exam(const char* masv_ci, const char* mamh_ci,
+                                 PTRMH mh,
+                                 ExamQItem*& items_out,
+                                 int& soCau, int& curIdx, int& remainSec) {
+    items_out = NULL;
+    soCau = 0; curIdx = 0; remainSec = 0;
+
+    char path[256];
+    build_inprogress_filename(masv_ci, mamh_ci, path, sizeof(path));
+
+    FILE* f = std::fopen(path, "rt");
+    if (!f) return false;
+
+    if (std::fscanf(f, "%d %d %d", &soCau, &remainSec, &curIdx) != 3) {
+        std::fclose(f);
+        return false;
+    }
+
+    if (soCau <= 0 || remainSec < 0 || curIdx < 0 || curIdx >= soCau) {
+        std::fclose(f);
+        return false;
+    }
+
+    int* ids   = new int[soCau];
+    char* ans  = new char[soCau];
+
+    for (int i = 0; i < soCau; ++i) {
+        int id; char c;
+        if (std::fscanf(f, "%d %c", &id, &c) != 2) {
+            delete[] ids;
+            delete[] ans;
+            std::fclose(f);
+            return false;
+        }
+        ids[i]  = id;
+        ans[i]  = c;
+    }
+    std::fclose(f);
+
+    // reconstruct ExamQItem[]
+    items_out = new ExamQItem[soCau];
+
+    for (int i = 0; i < soCau; ++i) {
+        int id = ids[i];
+        PTRCH p = mh->data.FirstCHT;
+        while (p && p->data.id != id) p = p->next;
+        if (!p) {
+            delete[] ids;
+            delete[] ans;
+            delete[] items_out;
+            items_out = NULL;
+            return false;
+        }
+
+        items_out[i].id = p->data.id;
+        su_strncpy(items_out[i].mamh, mh->data.mamh, 16);
+        su_strncpy(items_out[i].noidung, p->data.noidung, 501);
+        su_strncpy(items_out[i].A, p->data.A, 201);
+        su_strncpy(items_out[i].B, p->data.B, 201);
+        su_strncpy(items_out[i].C, p->data.C, 201);
+        su_strncpy(items_out[i].D, p->data.D, 201);
+        items_out[i].dapan = p->data.dapan;
+
+        char c = ans[i];
+        if (!(c == 'A' || c == 'B' || c == 'C' || c == 'D')) c = '?';
+        items_out[i].da_chon = c;
+    }
+
+    delete[] ids;
+    delete[] ans;
+    return true;
+}
+
+static void delete_inprogress_exam(const char* masv_ci, const char* mamh_ci) {
+    char path[256];
+    build_inprogress_filename(masv_ci, mamh_ci, path, sizeof(path));
+    std::remove(path);
+}
+
+// ================== THUC HIEN THI TRAC NGHIEM ==================
+//
+// Luu y logic moi:
+// - KHONG phu thuoc vao soCau / thoiGian tu menu de quyet dinh tiep tuc hay khong.
+// - Neu co file InProgress_<MASV>_<MAMH>.txt:
+//     + Hien thong tin -> hoi "co tiep tuc khong?"
+//     + YES: tiep tuc dung de cu (khong hoi so cau / so phut).
+//     + NO : xoa file tam, sau do moi hoi so cau / so phut cho de moi.
+//
 int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
                   const char* masv_ci, const char* mamh_ci,
                   int soCau, int thoiGianPhut)
@@ -95,69 +219,155 @@ int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
     // --- Tim SV va Lop ---
     Lop* lop = NULL;
     PTRSV sv = find_sv_global(ds, masv_ci, &lop);
-    if (!sv) return 1;
+    if (!sv) {
+        printf("Khong tim thay sinh vien.\n");
+        return 1;
+    }
 
     // --- Tim mon hoc ---
     PTRMH mh = find_monhoc(root, mamh_ci);
-    if (!mh) return 2;
+    if (!mh) {
+        printf("Khong tim thay mon hoc.\n");
+        return 2;
+    }
 
-    // --- Kiem tra so cau ---
     int n_q = dem_cau(mh->data.FirstCHT);
-    if (soCau <= 0) return 3;
-    if (soCau > n_q) return 4;
+    if (n_q <= 0) {
+        printf("Mon hoc nay chua co cau hoi nao, khong the thi.\n");
+        return 4;
+    }
 
-    // === Canh bao thi lai (neu da co bai thi truoc do) ===
-    ExamRecord* oldExam = find_exam(logs, masv_ci, mamh_ci);
-    if (oldExam) {
-        printf("\nBAN DA TUNG THI MON NAY TRUOC DO.\n");
-        printf("- Diem hien tai: %.1f\n", oldExam->diem);
-        printf("- Thi lai se GHI DE diem va bai thi cu.\n");
-        if (!confirm_dialog("Ban co chac muon THI LAI mon nay khong")) {
-            printf("Da huy thi mon nay.\n");
-            system("pause");
-            return 0; // chi huy thi, khong phai loi
+    // --- Thu tai bai thi dang do (neu co) ---
+    ExamQItem* items = NULL;
+    int soCauExam    = 0;
+    int curIdx       = 0;
+    int remainSec    = 0;
+
+    bool hasSaved = load_inprogress_exam(masv_ci, mamh_ci, mh,
+                                         items, soCauExam, curIdx, remainSec);
+
+    if (hasSaved && remainSec > 0) {
+        int soDaLam = 0;
+        for (int i = 0; i < soCauExam; ++i) {
+            char c = items[i].da_chon;
+            if (c == 'A' || c == 'B' || c == 'C' || c == 'D') ++soDaLam;
+        }
+
+        printf("\nBAN DANG CO MOT BAI THI CHUA HOAN THANH CHO MON %s.\n", mh->data.mamh);
+        printf("- So cau: %d (da tra loi: %d)\n", soCauExam, soDaLam);
+        printf("- Thoi gian con lai (khong tinh thoi gian ban thoat chuong trinh): %02d:%02d\n",
+               remainSec / 60, remainSec % 60);
+
+        if (confirm_dialog("Ban co muon TIEP TUC bai thi nay khong")) {
+            // tiep tuc -> bo qua canh bao thi lai (vi luc bat dau thi lai da canh bao roi)
+            // -> nhay xuong phan RUN_EXAM
+        } else {
+            // huy bai cu -> xoa file tam + giai phong items
+            delete_inprogress_exam(masv_ci, mamh_ci);
+            delete[] items;
+            items      = NULL;
+            soCauExam  = 0;
+            curIdx     = 0;
+            remainSec  = 0;
+            hasSaved   = false;
         }
     }
 
-    // --- Tao mang cau hoi ---
-    PTRCH* arr = new PTRCH[n_q];
-    int cnt = collect_questions(mh->data.FirstCHT, arr, n_q);
+    // --- Neu khong tiep tuc bai dang do -> co the la THI MOI / THI LAI ---
+    if (!hasSaved || !items) {
+        // Canh bao THI LAI neu da co bai thi trong log
+        ExamRecord* oldExam = find_exam(logs, masv_ci, mamh_ci);
+        if (oldExam) {
+            printf("\nBAN DA TUNG THI MON NAY TRUOC DO.\n");
+            printf("- Diem hien tai: %.1f\n", oldExam->diem);
+            printf("- Thi lai se GHI DE diem va bai thi cu.\n");
+            if (!confirm_dialog("Ban co chac muon THI LAI mon nay khong")) {
+                printf("Da huy thi mon nay.\n");
+                return 0; // khong phai loi, chi huy
+            }
+        }
 
-    int* idx = new int[cnt];
-    for (int i = 0; i < cnt; ++i) idx[i] = i;
-    shuffle_indices(idx, cnt);
+        // Hoi so cau / so phut neu tham so <= 0 hoac khong hop le
+        int soCauUse  = soCau;
+        int soPhutUse = thoiGianPhut;
 
-    ExamQItem* items = new ExamQItem[soCau];
-    for (int i = 0; i < soCau; ++i) {
-        PTRCH q = arr[idx[i]];
-        items[i].id = q->data.id;
-        su_strncpy(items[i].mamh, mh->data.mamh, 16);
-        su_strncpy(items[i].noidung, q->data.noidung, 501);
-        su_strncpy(items[i].A, q->data.A, 201);
-        su_strncpy(items[i].B, q->data.B, 201);
-        su_strncpy(items[i].C, q->data.C, 201);
-        su_strncpy(items[i].D, q->data.D, 201);
-        items[i].dapan   = q->data.dapan;
-        items[i].da_chon = '?';    // chua chon
+        if (soCauUse <= 0 || soCauUse > n_q) {
+            printf("\nMon %s - %s dang co %d cau hoi.\n",
+                   mh->data.mamh, mh->data.tenmh, n_q);
+            printf("Ban chi duoc chon so cau thi tu 1 den %d.\n", n_q);
+
+            char buf[64];
+            printf("So cau muon thi: ");
+            std::fgets(buf, sizeof(buf), stdin); chomp_line(buf);
+            soCauUse = std::atoi(buf);
+        }
+
+        if (soCauUse <= 0) {
+            printf("So cau thi khong hop le (phai > 0).\n");
+            return 3;
+        }
+        if (soCauUse > n_q) {
+            printf("Mon nay chi co %d cau hoi. Vui long nhap so cau <= %d.\n", n_q, n_q);
+            return 4;
+        }
+
+        if (soPhutUse <= 0) {
+            char buf[64];
+            printf("So phut lam bai: ");
+            std::fgets(buf, sizeof(buf), stdin); chomp_line(buf);
+            soPhutUse = std::atoi(buf);
+        }
+        if (soPhutUse <= 0) {
+            printf("So phut lam bai phai > 0.\n");
+            return 3;
+        }
+
+        // Random de moi
+        PTRCH* arr = new PTRCH[n_q];
+        int cnt    = collect_questions(mh->data.FirstCHT, arr, n_q);
+
+        int* idx = new int[cnt];
+        for (int i = 0; i < cnt; ++i) idx[i] = i;
+        shuffle_indices(idx, cnt);
+
+        items = new ExamQItem[soCauUse];
+        for (int i = 0; i < soCauUse; ++i) {
+            PTRCH q = arr[idx[i]];
+            items[i].id = q->data.id;
+            su_strncpy(items[i].mamh, mh->data.mamh, 16);
+            su_strncpy(items[i].noidung, q->data.noidung, 501);
+            su_strncpy(items[i].A, q->data.A, 201);
+            su_strncpy(items[i].B, q->data.B, 201);
+            su_strncpy(items[i].C, q->data.C, 201);
+            su_strncpy(items[i].D, q->data.D, 201);
+            items[i].dapan   = q->data.dapan;
+            items[i].da_chon = '?';
+        }
+
+        delete[] arr;
+        delete[] idx;
+
+        soCauExam = soCauUse;
+        curIdx    = 0;
+        remainSec = soPhutUse * 60;
+
+        // luu trang thai luc bat dau (phong tru program bi tat sớm)
+        save_inprogress_exam(masv_ci, mamh_ci, items, soCauExam, curIdx, remainSec);
     }
 
-    delete[] arr; arr = NULL;
-    delete[] idx; idx = NULL;
-
-    // === Giao dien thi ===
+    // ================== CHAY VONG THI (dung chung cho ca tiep tuc & thi moi) ==================
     clearScreen();
     hideCursor();
     printf("THI TRAC NGHIEM - SV: %s  - Lop: %s  - Mon: %s\n",
            sv->data.masv,
            lop ? lop->malop : "(?)",
            mh->data.mamh);
-    printf("So cau: %d   Thoi gian: %d phut   (F9: NOP SOM, ESC: HOI NOP BAI)\n",
-           soCau, thoiGianPhut);
+    printf("So cau: %d   (F9: NOP SOM, ESC: HOI NOP BAI)\n", soCauExam);
     printf("---------------------------------------------------------------\n");
 
-    int cur = 0;
-    int totalSec = thoiGianPhut * 60;
-    ULONGLONG endTick = GetTickCount64() + (ULONGLONG)totalSec * 1000ULL;
+    // endTick = now + remainSec
+    ULONGLONG endTick = GetTickCount64() + (ULONGLONG)remainSec * 1000ULL;
+    int cur = curIdx;
 
     while (1) {
         int remain = (int)((endTick - GetTickCount64()) / 1000ULL);
@@ -165,10 +375,10 @@ int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
 
         // Dong thong tin cau + thoi gian
         gotoxy(0, ROW_INFO);
-        printf("Cau %d/%d   ", cur + 1, soCau);
+        printf("Cau %d/%d   ", cur + 1, soCauExam);
         print_mmss_at(25, ROW_INFO, remain);
 
-        // In noi dung cau hoi (co padding de khong de lai ky tu thua)
+        // In noi dung cau hoi
         gotoxy(0, ROW_QUESTION);
         printf("Noi dung: %-70s\n", items[cur].noidung);
         printf("A) %-70s\n", items[cur].A);
@@ -182,7 +392,7 @@ int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
             printf("Da chon: %c\n", items[cur].da_chon);
 
         // Thanh trang thai dap an
-        draw_answer_bar(items, soCau, cur);
+        draw_answer_bar(items, soCauExam, cur);
 
         if (remain == 0) {
             gotoxy(0, ROW_QUESTION + 8);
@@ -194,37 +404,58 @@ int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
         int key = readKey();
         if (key == KEY_NONE) { Sleep(60); continue; }
 
+        bool changed = false;
+
         if (key == KEY_ESC) {
-            if (confirm_dialog("Ban co muon NOP BAI ngay bay gio khong")) break;
+            if (confirm_dialog("Ban co muon NOP BAI ngay bay gio khong")) {
+                // luu lan cuoi truoc khi nop
+                save_inprogress_exam(masv_ci, mamh_ci, items, soCauExam, cur, remain);
+                break;
+            }
         } else if (key == KEY_F9) {
-            if (confirm_dialog("Ban co muon NOP SOM khong")) break;
+            if (confirm_dialog("Ban co muon NOP SOM khong")) {
+                save_inprogress_exam(masv_ci, mamh_ci, items, soCauExam, cur, remain);
+                break;
+            }
         } else if (key == KEY_LEFT) {
-            if (cur > 0) --cur;
+            if (cur > 0) { --cur; changed = true; }
         } else if (key == KEY_RIGHT || key == KEY_ENTER) {
-            if (cur < soCau - 1) ++cur;
+            if (cur < soCauExam - 1) { ++cur; changed = true; }
         } else {
             if (key >= 'a' && key <= 'z') key = key - 'a' + 'A';
             if (key == 'A' || key == 'B' || key == 'C' || key == 'D') {
-                items[cur].da_chon = (char)key;
-                if (cur < soCau - 1) ++cur;
+                if (items[cur].da_chon != (char)key) {
+                    items[cur].da_chon = (char)key;
+                    changed = true;
+                }
+                if (cur < soCauExam - 1) { ++cur; changed = true; }
             }
         }
+
+        if (changed) {
+            // luu trang thai moi nhat (dap an + cau hien tai + thoi gian con lai)
+            save_inprogress_exam(masv_ci, mamh_ci, items, soCauExam, cur, remain);
+        }
     }
+
     showCursor();
+
+    // Bai thi da ket thuc -> xoa file tam
+    delete_inprogress_exam(masv_ci, mamh_ci);
 
     // Tinh diem
     int dung = 0;
-    for (int i = 0; i < soCau; ++i) {
+    for (int i = 0; i < soCauExam; ++i) {
         if (items[i].da_chon == items[i].dapan) ++dung;
     }
-    float diem = round1(10.0f * dung / (float)soCau);
+    float diem = round1(10.0f * dung / (float)soCauExam);
 
     // Luu bai thi + diem
-    upsert_exam(logs, sv->data.masv, mh->data.mamh, items, soCau, dung, diem);
+    upsert_exam(logs, sv->data.masv, mh->data.mamh, items, soCauExam, dung, diem);
     upsert_diem(sv->data.ds_diemthi, mh->data.mamh, diem);
 
     printf("\nDa NOP BAI.\n");
-    printf("- So cau dung: %d/%d\n", dung, soCau);
+    printf("- So cau dung: %d/%d\n", dung, soCauExam);
     printf("- Diem: %.1f\n", diem);
     printf("Ket qua da duoc LUu.\n");
     printf("Ban co the xem lai tai menu:\n");
