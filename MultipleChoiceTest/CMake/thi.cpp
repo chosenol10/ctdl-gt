@@ -1,4 +1,4 @@
-// thi.cpp (toi uu UX + canh bao thi lai + in ro dung/sai)
+// thi.cpp (toi uu UX + canh bao thi lai + in ro dung/sai + thanh trang thai dap an)
 #include "thi.h"
 #include "ds_ops.h"
 #include "cauhoi.h"
@@ -10,6 +10,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <windows.h>
+#include <conio.h>
+
+// ================== HANG SO GIAO DIEN ==================
+static const int ROW_INFO      = 2;   // dong thong tin cau + thoi gian
+static const int ROW_QUESTION  = 4;   // bat dau in cau hoi
+static const int ROW_ANSWERBAR = 14;  // thanh trang thai cau / dap an
+
+// ================== HELPERS CHUNG ==================
 
 // lam tron 1 chu so thap phan (vd 7.26 -> 7.3)
 static float round1(float x) {
@@ -39,7 +47,7 @@ static int collect_questions(PTRCH head, PTRCH* arr, int cap) {
     return c;
 }
 
-// tron ngau nhien mang chi so
+// tron ngau nhien mang chi so (dung rand_in trong rng.h)
 static void shuffle_indices(int* idx, int n) {
     rng_seed_once();
     for (int i = n - 1; i > 0; --i) {
@@ -48,19 +56,52 @@ static void shuffle_indices(int* idx, int n) {
     }
 }
 
-// ------------------------------------------------------
-// THUC HIEN THI TRAC NGHIEM
-// ------------------------------------------------------
+// ve thanh trang thai dap an (so cau + dap an + mui ^ chi cau hien tai)
+static void draw_answer_bar(const ExamQItem* items, int soCau, int curIdx) {
+    // Dong so cau
+    gotoxy(0, ROW_ANSWERBAR);
+    printf("Cau : ");
+    for (int i = 0; i < soCau; ++i) {
+        printf("%2d ", i + 1);
+    }
+    printf("   ");
+
+    // Dong dap an
+    gotoxy(0, ROW_ANSWERBAR + 1);
+    printf("Dap : ");
+    for (int i = 0; i < soCau; ++i) {
+        char c = items[i].da_chon;
+        if (c != 'A' && c != 'B' && c != 'C' && c != 'D') c = '.';
+        printf(" %c ", c);
+    }
+    printf("   ");
+
+    // Dong mui ten chi cau hien tai
+    gotoxy(0, ROW_ANSWERBAR + 2);
+    printf("      ");
+    for (int i = 0; i < soCau; ++i) {
+        if (i == curIdx) printf(" ^ ");
+        else             printf("   ");
+    }
+    printf("   ");
+}
+
+// ================== THUC HIEN THI TRAC NGHIEM ==================
+
 int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
                   const char* masv_ci, const char* mamh_ci,
-                  int soCau, int thoiGianPhut) {
+                  int soCau, int thoiGianPhut)
+{
+    // --- Tim SV va Lop ---
     Lop* lop = NULL;
     PTRSV sv = find_sv_global(ds, masv_ci, &lop);
     if (!sv) return 1;
 
+    // --- Tim mon hoc ---
     PTRMH mh = find_monhoc(root, mamh_ci);
     if (!mh) return 2;
 
+    // --- Kiem tra so cau ---
     int n_q = dem_cau(mh->data.FirstCHT);
     if (soCau <= 0) return 3;
     if (soCau > n_q) return 4;
@@ -78,7 +119,7 @@ int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
         }
     }
 
-    // Tao mang cau hoi
+    // --- Tao mang cau hoi ---
     PTRCH* arr = new PTRCH[n_q];
     int cnt = collect_questions(mh->data.FirstCHT, arr, n_q);
 
@@ -97,7 +138,7 @@ int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
         su_strncpy(items[i].C, q->data.C, 201);
         su_strncpy(items[i].D, q->data.D, 201);
         items[i].dapan   = q->data.dapan;
-        items[i].da_chon = '?';
+        items[i].da_chon = '?';    // chua chon
     }
 
     delete[] arr; arr = NULL;
@@ -123,22 +164,28 @@ int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
         if (remain < 0) remain = 0;
 
         // Dong thong tin cau + thoi gian
-        gotoxy(0, 2);
+        gotoxy(0, ROW_INFO);
         printf("Cau %d/%d   ", cur + 1, soCau);
-        print_mmss_at(25, 2, remain);
+        print_mmss_at(25, ROW_INFO, remain);
 
         // In noi dung cau hoi (co padding de khong de lai ky tu thua)
-        gotoxy(0, 4);
+        gotoxy(0, ROW_QUESTION);
         printf("Noi dung: %-70s\n", items[cur].noidung);
         printf("A) %-70s\n", items[cur].A);
         printf("B) %-70s\n", items[cur].B);
         printf("C) %-70s\n", items[cur].C);
         printf("D) %-70s\n", items[cur].D);
         printf("Chon (A/B/C/D), <- ->: lui/tien, F9: nop som, ESC: hoi nop bai.\n");
-        printf("Da chon: %c\n", items[cur].da_chon);
+        if (items[cur].da_chon == '?')
+            printf("Da chon: (chua chon)\n");
+        else
+            printf("Da chon: %c\n", items[cur].da_chon);
+
+        // Thanh trang thai dap an
+        draw_answer_bar(items, soCau, cur);
 
         if (remain == 0) {
-            gotoxy(0, 12);
+            gotoxy(0, ROW_QUESTION + 8);
             printf("Het gio! Tu dong nop bai...\n");
             Sleep(1000);
             break;
@@ -190,9 +237,8 @@ int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
     return 0;
 }
 
-// ------------------------------------------------------
-// IN CHI TIET BAI THI CUA 1 SV CHO 1 MON
-// ------------------------------------------------------
+// ================== IN CHI TIET BAI THI CUA 1 SV CHO 1 MON ==================
+
 void in_chi_tiet_bai_thi(PTRExamLog logs, const char* masv_ci, const char* mamh_ci) {
     ExamRecord* r = find_exam(logs, masv_ci, mamh_ci);
     if (!r) {
@@ -212,9 +258,8 @@ void in_chi_tiet_bai_thi(PTRExamLog logs, const char* masv_ci, const char* mamh_
     }
 }
 
-// ------------------------------------------------------
-// IN BANG DIEM 1 LOP
-// ------------------------------------------------------
+// ================== IN BANG DIEM 1 LOP ==================
+
 static void print_diem_of_sv_for_mon(PTRSV sv, const char* mamh_ci) {
     PTRDiemThi d = sv->data.ds_diemthi;
     while (d) {
