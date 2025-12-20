@@ -1,7 +1,6 @@
-6
+5
 N23DECE01, Cntt, 0
 N23ABCD, Cntt-clc, 2
 N23CQCE01, Marketing, 0
 E24CQCE01N, Toan Roi Rac, 7
 N24CQCE01N, Toan, 0
-N24CQCE011, , 0
