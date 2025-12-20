@@ -1,4 +1,10 @@
-// thi.cpp (thi tiep tuc khi bi vang + thanh trang thai dap an + canh bao thi lai)
+// thi.cpp
+// (thi tiep tuc khi bi vang + thanh trang thai dap an + canh bao thi lai + danh dau cau)
+//
+// Do phuc tap chinh (big-O):
+// - find_sv_global:    O(tong_so_SV_toan_he_thong)
+// - thuc_hien_thi:     O(soCauExam) cho viec cham diem + O(soCauExam) cho load/save/tron de
+// - in_bang_diem_lop:  O(so_mon * so_SV_trong_lop)
 
 #include "thi.h"
 #include "ds_ops.h"
@@ -21,12 +27,14 @@ static const int ROW_ANSWERBAR = 14;  // thanh trang thai cau / dap an
 // ================== HELPERS CHUNG ==================
 
 // lam tron 1 chu so thap phan (vd 7.26 -> 7.3)
+// Do phuc tap: O(1)
 static float round1(float x) {
     if (x >= 0) return (float)((int)(x * 10 + 0.5f)) / 10.0f;
     return (float)((int)(x * 10 - 0.5f)) / 10.0f;
 }
 
 // tim SV theo MASV (da normalize) tren toan he thong
+// Do phuc tap: O(tong_so_SV_toan_he_thong)
 static PTRSV find_sv_global(DS_Lop& ds, const char* masv_ci, Lop** lopFound) {
     if (lopFound) *lopFound = NULL;
     for (int i = 0; i < ds.n; ++i) {
@@ -42,13 +50,15 @@ static PTRSV find_sv_global(DS_Lop& ds, const char* masv_ci, Lop** lopFound) {
 }
 
 // gom cau hoi vao mang con tro
+// Do phuc tap: O(so_cau_cua_mon)
 static int collect_questions(PTRCH head, PTRCH* arr, int cap) {
     int c = 0;
     for (PTRCH p = head; p && c < cap; p = p->next) arr[c++] = p;
     return c;
 }
 
-// tron ngau nhien mang chi so (dung rand_in trong rng.h)
+// tron ngau nhien mang chi so (Fisher-Yates)
+// Do phuc tap: O(n)
 static void shuffle_indices(int* idx, int n) {
     rng_seed_once();
     for (int i = n - 1; i > 0; --i) {
@@ -57,8 +67,13 @@ static void shuffle_indices(int* idx, int n) {
     }
 }
 
-// ve thanh trang thai dap an (so cau + dap an + mui ^ chi cau hien tai)
-static void draw_answer_bar(const ExamQItem* items, int soCau, int curIdx) {
+// ve thanh trang thai dap an + danh dau + mui ^ chi cau hien tai
+// Do phuc tap: O(soCau)
+static void draw_answer_bar(const ExamQItem* items,
+                            const bool* marked,
+                            int soCau,
+                            int curIdx)
+{
     // Dong so cau
     gotoxy(0, ROW_ANSWERBAR);
     printf("Cau : ");
@@ -77,8 +92,17 @@ static void draw_answer_bar(const ExamQItem* items, int soCau, int curIdx) {
     }
     printf("   ");
 
-    // Dong mui ten chi cau hien tai
+    // Dong danh dau
     gotoxy(0, ROW_ANSWERBAR + 2);
+    printf("Mark: ");
+    for (int i = 0; i < soCau; ++i) {
+        char m = (marked && marked[i]) ? '*' : ' ';
+        printf(" %c ", m);
+    }
+    printf("   ");
+
+    // Dong mui ten chi cau hien tai
+    gotoxy(0, ROW_ANSWERBAR + 3);
     printf("      ");
     for (int i = 0; i < soCau; ++i) {
         if (i == curIdx) printf(" ^ ");
@@ -91,9 +115,13 @@ static void draw_answer_bar(const ExamQItem* items, int soCau, int curIdx) {
 //
 // File: InProgress_<MASV>_<MAMH>.txt
 // Dong 1: soCau remainSec curIdx
-// Dong 2..: id da_chon
+// Dong 2..: id da_chon markFlag
+//   - id       : id cau hoi
+//   - da_chon  : 'A'/'B'/'C'/'D' hoac '?' neu chua chon
+//   - markFlag : 0 hoac 1 (cau nay co dang duoc danh dau khong)
 //
 
+// Do phuc tap: O(1)
 static void build_inprogress_filename(const char* masv_ci,
                                       const char* mamh_ci,
                                       char* out, int outSize) {
@@ -101,9 +129,14 @@ static void build_inprogress_filename(const char* masv_ci,
     std::snprintf(out, outSize, "InProgress_%s_%s.txt", masv_ci, mamh_ci);
 }
 
+// Do phuc tap: O(soCau)
 static bool save_inprogress_exam(const char* masv_ci, const char* mamh_ci,
-                                 const ExamQItem* items, int soCau,
-                                 int curIdx, int remainSec) {
+                                 const ExamQItem* items,
+                                 const bool* marked,
+                                 int soCau,
+                                 int curIdx,
+                                 int remainSec)
+{
     if (!items || soCau <= 0) return false;
 
     char path[256];
@@ -116,19 +149,26 @@ static bool save_inprogress_exam(const char* masv_ci, const char* mamh_ci,
     for (int i = 0; i < soCau; ++i) {
         char c = items[i].da_chon;
         if (!(c == 'A' || c == 'B' || c == 'C' || c == 'D')) c = '?';
-        std::fprintf(f, "%d %c\n", items[i].id, c);
+        int markFlag = (marked && marked[i]) ? 1 : 0;
+        std::fprintf(f, "%d %c %d\n", items[i].id, c, markFlag);
     }
 
     std::fclose(f);
     return true;
 }
 
-// Tai full bai thi dang lam: reconstruct ExamQItem tu cay cau hoi
+// Tai full bai thi dang lam: reconstruct ExamQItem & mang marked tu cay cau hoi
+// Do phuc tap: O(soCau * soCauCuaMon) trong truong hop xau nhat (duyet list cau hoi de tim id)
 static bool load_inprogress_exam(const char* masv_ci, const char* mamh_ci,
                                  PTRMH mh,
                                  ExamQItem*& items_out,
-                                 int& soCau, int& curIdx, int& remainSec) {
-    items_out = NULL;
+                                 bool*& marked_out,
+                                 int& soCau,
+                                 int& curIdx,
+                                 int& remainSec)
+{
+    items_out  = NULL;
+    marked_out = NULL;
     soCau = 0; curIdx = 0; remainSec = 0;
 
     char path[256];
@@ -147,24 +187,31 @@ static bool load_inprogress_exam(const char* masv_ci, const char* mamh_ci,
         return false;
     }
 
-    int* ids   = new int[soCau];
+    int*  ids  = new int[soCau];
     char* ans  = new char[soCau];
+    int*  mark = new int[soCau];
 
     for (int i = 0; i < soCau; ++i) {
-        int id; char c;
-        if (std::fscanf(f, "%d %c", &id, &c) != 2) {
+        int id;
+        char c;
+        int markFlag = 0;
+        int nread = std::fscanf(f, "%d %c %d", &id, &c, &markFlag);
+        if (nread < 2) {
             delete[] ids;
             delete[] ans;
+            delete[] mark;
             std::fclose(f);
             return false;
         }
+        if (nread < 3) markFlag = 0; // ho tro file cu chi co 2 truong id + da_chon
         ids[i]  = id;
         ans[i]  = c;
+        mark[i] = markFlag;
     }
     std::fclose(f);
 
-    // reconstruct ExamQItem[]
-    items_out = new ExamQItem[soCau];
+    items_out  = new ExamQItem[soCau];
+    marked_out = new bool[soCau];
 
     for (int i = 0; i < soCau; ++i) {
         int id = ids[i];
@@ -173,8 +220,11 @@ static bool load_inprogress_exam(const char* masv_ci, const char* mamh_ci,
         if (!p) {
             delete[] ids;
             delete[] ans;
+            delete[] mark;
             delete[] items_out;
-            items_out = NULL;
+            delete[] marked_out;
+            items_out  = NULL;
+            marked_out = NULL;
             return false;
         }
 
@@ -190,13 +240,17 @@ static bool load_inprogress_exam(const char* masv_ci, const char* mamh_ci,
         char c = ans[i];
         if (!(c == 'A' || c == 'B' || c == 'C' || c == 'D')) c = '?';
         items_out[i].da_chon = c;
+
+        marked_out[i] = (mark[i] != 0);
     }
 
     delete[] ids;
     delete[] ans;
+    delete[] mark;
     return true;
 }
 
+// Do phuc tap: O(1) voi he dieu hanh Windows
 static void delete_inprogress_exam(const char* masv_ci, const char* mamh_ci) {
     char path[256];
     build_inprogress_filename(masv_ci, mamh_ci, path, sizeof(path));
@@ -205,12 +259,13 @@ static void delete_inprogress_exam(const char* masv_ci, const char* mamh_ci) {
 
 // ================== THUC HIEN THI TRAC NGHIEM ==================
 //
-// Luu y logic moi:
+// Logic:
 // - KHONG phu thuoc vao soCau / thoiGian tu menu de quyet dinh tiep tuc hay khong.
 // - Neu co file InProgress_<MASV>_<MAMH>.txt:
 //     + Hien thong tin -> hoi "co tiep tuc khong?"
 //     + YES: tiep tuc dung de cu (khong hoi so cau / so phut).
-//     + NO : xoa file tam, sau do moi hoi so cau / so phut cho de moi.
+//     + NO : xoa file tam, sau do dung tham so soCau, thoiGianPhut lam de moi.
+// - Co chuc nang danh dau cau hoi bang phim 'M'.
 //
 int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
                   const char* masv_ci, const char* mamh_ci,
@@ -238,15 +293,17 @@ int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
     }
 
     // --- Thu tai bai thi dang do (neu co) ---
-    ExamQItem* items = NULL;
-    int soCauExam    = 0;
-    int curIdx       = 0;
-    int remainSec    = 0;
+    ExamQItem* items  = NULL;
+    bool*      marked = NULL;
+    int soCauExam     = 0;
+    int curIdx        = 0;
+    int remainSec     = 0;
 
     bool hasSaved = load_inprogress_exam(masv_ci, mamh_ci, mh,
-                                         items, soCauExam, curIdx, remainSec);
+                                         items, marked,
+                                         soCauExam, curIdx, remainSec);
 
-    if (hasSaved && remainSec > 0) {
+    if (hasSaved && remainSec > 0 && items && marked) {
         int soDaLam = 0;
         for (int i = 0; i < soCauExam; ++i) {
             char c = items[i].da_chon;
@@ -259,13 +316,14 @@ int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
                remainSec / 60, remainSec % 60);
 
         if (confirm_dialog("Ban co muon TIEP TUC bai thi nay khong")) {
-            // tiep tuc -> bo qua canh bao thi lai (vi luc bat dau thi lai da canh bao roi)
-            // -> nhay xuong phan RUN_EXAM
+            // tiep tuc -> bo qua canh bao thi lai (vi luc bat dau da canh bao)
         } else {
-            // huy bai cu -> xoa file tam + giai phong items
+            // huy bai cu -> xoa file tam + giai phong items/marked
             delete_inprogress_exam(masv_ci, mamh_ci);
             delete[] items;
+            delete[] marked;
             items      = NULL;
+            marked     = NULL;
             soCauExam  = 0;
             curIdx     = 0;
             remainSec  = 0;
@@ -273,8 +331,8 @@ int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
         }
     }
 
-    // --- Neu khong tiep tuc bai dang do -> co the la THI MOI / THI LAI ---
-    if (!hasSaved || !items) {
+    // --- Neu khong tiep tuc bai dang do -> THI MOI / THI LAI ---
+    if (!hasSaved || !items || !marked) {
         // Canh bao THI LAI neu da co bai thi trong log
         ExamRecord* oldExam = find_exam(logs, masv_ci, mamh_ci);
         if (oldExam) {
@@ -287,10 +345,10 @@ int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
             }
         }
 
-        // Hoi so cau / so phut neu tham so <= 0 hoac khong hop le
         int soCauUse  = soCau;
         int soPhutUse = thoiGianPhut;
 
+        // Neu menu truyen soCau/thoiGian hop le thi dung luon, khong hoi lai.
         if (soCauUse <= 0 || soCauUse > n_q) {
             printf("\nMon %s - %s dang co %d cau hoi.\n",
                    mh->data.mamh, mh->data.tenmh, n_q);
@@ -326,13 +384,15 @@ int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
         PTRCH* arr = new PTRCH[n_q];
         int cnt    = collect_questions(mh->data.FirstCHT, arr, n_q);
 
-        int* idx = new int[cnt];
-        for (int i = 0; i < cnt; ++i) idx[i] = i;
-        shuffle_indices(idx, cnt);
+        int* idxArr = new int[cnt];
+        for (int i = 0; i < cnt; ++i) idxArr[i] = i;
+        shuffle_indices(idxArr, cnt);
 
-        items = new ExamQItem[soCauUse];
+        items  = new ExamQItem[soCauUse];
+        marked = new bool[soCauUse];
+
         for (int i = 0; i < soCauUse; ++i) {
-            PTRCH q = arr[idx[i]];
+            PTRCH q = arr[idxArr[i]];
             items[i].id = q->data.id;
             su_strncpy(items[i].mamh, mh->data.mamh, 16);
             su_strncpy(items[i].noidung, q->data.noidung, 501);
@@ -342,28 +402,29 @@ int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
             su_strncpy(items[i].D, q->data.D, 201);
             items[i].dapan   = q->data.dapan;
             items[i].da_chon = '?';
+            marked[i]        = false;
         }
 
         delete[] arr;
-        delete[] idx;
+        delete[] idxArr;
 
         soCauExam = soCauUse;
         curIdx    = 0;
         remainSec = soPhutUse * 60;
 
-        // luu trang thai luc bat dau (phong tru program bi tat sớm)
-        save_inprogress_exam(masv_ci, mamh_ci, items, soCauExam, curIdx, remainSec);
+        // luu trang thai luc bat dau (phong tru program bi tat som)
+        save_inprogress_exam(masv_ci, mamh_ci, items, marked, soCauExam, curIdx, remainSec);
     }
 
-    // ================== CHAY VONG THI (dung chung cho ca tiep tuc & thi moi) ==================
+    // ================== CHAY VONG THI (dung cho ca tiep tuc & thi moi) ==================
     clearScreen();
     hideCursor();
     printf("THI TRAC NGHIEM - SV: %s  - Lop: %s  - Mon: %s\n",
            sv->data.masv,
            lop ? lop->malop : "(?)",
            mh->data.mamh);
-    printf("So cau: %d   (F9: NOP SOM, ESC: HOI NOP BAI)\n", soCauExam);
-    printf("---------------------------------------------------------------\n");
+    printf("So cau: %d   (M: danh dau, F9: NOP SOM, ESC: HOI NOP BAI)\n", soCauExam);
+    printf("---------------------------------------------------------------------\n");
 
     // endTick = now + remainSec
     ULONGLONG endTick = GetTickCount64() + (ULONGLONG)remainSec * 1000ULL;
@@ -385,17 +446,19 @@ int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
         printf("B) %-70s\n", items[cur].B);
         printf("C) %-70s\n", items[cur].C);
         printf("D) %-70s\n", items[cur].D);
-        printf("Chon (A/B/C/D), <- ->: lui/tien, F9: nop som, ESC: hoi nop bai.\n");
-        if (items[cur].da_chon == '?')
-            printf("Da chon: (chua chon)\n");
-        else
-            printf("Da chon: %c\n", items[cur].da_chon);
+        printf("Chon (A/B/C/D), M: danh dau/bo danh dau, <- ->: lui/tien, F9: nop som, ESC: hoi nop bai.\n");
 
-        // Thanh trang thai dap an
-        draw_answer_bar(items, soCauExam, cur);
+        if (items[cur].da_chon == '?')
+            printf("Da chon: (chua chon)   ");
+        else
+            printf("Da chon: %c            ", items[cur].da_chon);
+        printf("Trang thai danh dau: %s\n", marked[cur] ? "CO" : "KHONG");
+
+        // Thanh trang thai dap an + danh dau
+        draw_answer_bar(items, marked, soCauExam, cur);
 
         if (remain == 0) {
-            gotoxy(0, ROW_QUESTION + 8);
+            gotoxy(0, ROW_QUESTION + 9);
             printf("Het gio! Tu dong nop bai...\n");
             Sleep(1000);
             break;
@@ -408,13 +471,12 @@ int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
 
         if (key == KEY_ESC) {
             if (confirm_dialog("Ban co muon NOP BAI ngay bay gio khong")) {
-                // luu lan cuoi truoc khi nop
-                save_inprogress_exam(masv_ci, mamh_ci, items, soCauExam, cur, remain);
+                save_inprogress_exam(masv_ci, mamh_ci, items, marked, soCauExam, cur, remain);
                 break;
             }
         } else if (key == KEY_F9) {
             if (confirm_dialog("Ban co muon NOP SOM khong")) {
-                save_inprogress_exam(masv_ci, mamh_ci, items, soCauExam, cur, remain);
+                save_inprogress_exam(masv_ci, mamh_ci, items, marked, soCauExam, cur, remain);
                 break;
             }
         } else if (key == KEY_LEFT) {
@@ -423,18 +485,23 @@ int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
             if (cur < soCauExam - 1) { ++cur; changed = true; }
         } else {
             if (key >= 'a' && key <= 'z') key = key - 'a' + 'A';
+
             if (key == 'A' || key == 'B' || key == 'C' || key == 'D') {
                 if (items[cur].da_chon != (char)key) {
                     items[cur].da_chon = (char)key;
                     changed = true;
                 }
                 if (cur < soCauExam - 1) { ++cur; changed = true; }
+            } else if (key == 'M') {
+                // Toggle danh dau cau hien tai
+                marked[cur] = !marked[cur];
+                changed = true;
             }
         }
 
         if (changed) {
-            // luu trang thai moi nhat (dap an + cau hien tai + thoi gian con lai)
-            save_inprogress_exam(masv_ci, mamh_ci, items, soCauExam, cur, remain);
+            // luu trang thai moi nhat (dap an + cau hien tai + thoi gian con lai + danh dau)
+            save_inprogress_exam(masv_ci, mamh_ci, items, marked, soCauExam, cur, remain);
         }
     }
 
@@ -464,6 +531,7 @@ int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
     printf("\nNhan phim bat ky de tiep tuc...");
     _getch();
 
+    delete[] marked;
     delete[] items;
     return 0;
 }
@@ -503,6 +571,7 @@ static void print_diem_of_sv_for_mon(PTRSV sv, const char* mamh_ci) {
     printf("  CHUA"); // chua thi mon nay
 }
 
+// Do phuc tap: O(so_mon * so_SV_trong_lop)
 static void inorder_print_bangdiem(const DS_Lop& ds, const char* malop_ci, PTRMH r) {
     if (!r) return;
     inorder_print_bangdiem(ds, malop_ci, r->left);
