@@ -1,4 +1,4 @@
-// menu.cpp (da toi uu: UX + AUTO-SAVE + UNDO + SORT + validate input)
+// menu.cpp (da toi uu: UX + AUTO-SAVE + UNDO + SORT + validate input + chan nhap toan space)
 #include "menu.h"
 #include "fileio.h"
 #include "ds_ops.h"
@@ -53,6 +53,7 @@ static void save_all() {
     if (!ghi_monhoc_txt(PATH_MON, g_rootMH))        printf("Loi ghi %s\n", PATH_MON);
     if (!ghi_cauhoi_txt(PATH_CH, g_rootMH))         printf("Loi ghi %s\n", PATH_CH);
     if (!ghi_sinhvien_dathi_txt(PATH_SVDT, g_logs)) printf("Loi ghi %s\n", PATH_SVDT);
+    printf("Da luu du lieu.\n");
 }
 
 static void load_all() {
@@ -178,6 +179,18 @@ static bool read_int(const char* prompt, int& out) {
         return false;
     }
     while (getchar() != '\n'); // an newline
+    return true;
+}
+
+// Kiem tra chuoi rong hoac chi gom khoang trang/tab
+// Độ phức tạp: O(len)
+static bool is_blank_str(const char* s) {
+    if (!s) return true;
+    for (const char* p = s; *p; ++p) {
+        if (*p != ' ' && *p != '\t') {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -697,8 +710,8 @@ static void menu_quanly_lop() {
 
             printf("Nhap TEN LOP: ");
             std::fgets(tl, sizeof(tl), stdin); chomp_line(tl);
-            if (su_strlen(tl) == 0) {
-                printf("Loi: TEN LOP khong duoc rong.\n");
+            if (is_blank_str(tl)) {
+                printf("Loi: TEN LOP khong duoc rong hoac chi co khoang trang.\n");
                 system("pause");
                 continue;
             }
@@ -814,16 +827,16 @@ static void menu_quanly_sv() {
 
             printf("Ho: ");
             std::fgets(ho, sizeof(ho), stdin); chomp_line(ho);
-            if (su_strlen(ho) == 0) {
-                printf("Loi: Ho khong duoc rong.\n");
+            if (is_blank_str(ho)) {
+                printf("Loi: Ho khong duoc rong hoac chi co khoang trang.\n");
                 system("pause");
                 continue;
             }
 
             printf("Ten: ");
             std::fgets(ten, sizeof(ten), stdin); chomp_line(ten);
-            if (su_strlen(ten) == 0) {
-                printf("Loi: Ten khong duoc rong.\n");
+            if (is_blank_str(ten)) {
+                printf("Loi: Ten khong duoc rong hoac chi co khoang trang.\n");
                 system("pause");
                 continue;
             }
@@ -840,8 +853,8 @@ static void menu_quanly_sv() {
             printf("Password (4-20 ky tu): ");
             std::fgets(pw, sizeof(pw), stdin); chomp_line(pw);
             int lenpw = (int)su_strlen(pw);
-            if (lenpw < 4 || lenpw > 20) {
-                printf("Loi: PASSWORD phai co do dai tu 4 den 20 ky tu.\n");
+            if (lenpw < 4 || lenpw > 20 || is_blank_str(pw)) {
+                printf("Loi: PASSWORD phai co do dai tu 4 den 20 ky tu va khong duoc chi co khoang trang.\n");
                 system("pause");
                 continue;
             }
@@ -894,19 +907,19 @@ static void menu_quanly_sv() {
 
             printf("Ho moi (bo trong = giu nguyen: %s): ", sv->data.ho);
             std::fgets(ho, sizeof(ho), stdin); chomp_line(ho);
-            if (su_strlen(ho) == 0) su_strcpy(ho, sv->data.ho);
+            if (is_blank_str(ho)) su_strcpy(ho, sv->data.ho);
 
             printf("Ten moi (bo trong = giu nguyen: %s): ", sv->data.ten);
             std::fgets(ten, sizeof(ten), stdin); chomp_line(ten);
-            if (su_strlen(ten) == 0) su_strcpy(ten, sv->data.ten);
+            if (is_blank_str(ten)) su_strcpy(ten, sv->data.ten);
 
             printf("Phai moi (NAM/NU, bo trong = %s): ", sv->data.phai);
             std::fgets(phai, sizeof(phai), stdin); chomp_line(phai);
-            if (su_strlen(phai) == 0) su_strcpy(phai, sv->data.phai);
+            if (is_blank_str(phai)) su_strcpy(phai, sv->data.phai);
 
             printf("Password moi (4-20 ky tu, bo trong = giu nguyen): ");
             std::fgets(pw, sizeof(pw), stdin); chomp_line(pw);
-            if (su_strlen(pw) == 0) su_strcpy(pw, sv->data.password);
+            if (is_blank_str(pw)) su_strcpy(pw, sv->data.password);
 
             save_undo_snapshot();
 
@@ -1015,8 +1028,8 @@ static void menu_quanly_monhoc() {
 
             printf("Ten MH: ");
             std::fgets(tn, sizeof(tn), stdin); chomp_line(tn);
-            if (su_strlen(tn) == 0) {
-                printf("Loi: Ten mon hoc khong duoc rong.\n");
+            if (is_blank_str(tn)) {
+                printf("Loi: Ten mon hoc khong duoc rong hoac chi co khoang trang.\n");
                 system("pause");
                 continue;
             }
@@ -1052,8 +1065,8 @@ static void menu_quanly_monhoc() {
             char tn[128];
             printf("\nTen MH moi: ");
             std::fgets(tn, sizeof(tn), stdin); chomp_line(tn);
-            if (su_strlen(tn) == 0) {
-                printf("Loi: Ten mon hoc khong duoc rong.\n");
+            if (is_blank_str(tn)) {
+                printf("Loi: Ten mon hoc khong duoc rong hoac chi co khoang trang.\n");
                 system("pause");
                 continue;
             }
@@ -1143,16 +1156,43 @@ static void menu_quanly_cauhoi() {
 
             printf("\nNhap noi dung cau hoi:\n");
             std::fgets(ch.noidung, sizeof(ch.noidung), stdin); chomp_line(ch.noidung);
-            if (su_strlen(ch.noidung) == 0) {
-                printf("Loi: Noi dung cau hoi khong duoc rong.\n");
+            if (is_blank_str(ch.noidung)) {
+                printf("Loi: Noi dung cau hoi khong duoc rong hoac chi co khoang trang.\n");
                 system("pause");
                 continue;
             }
 
-            printf("Phuong an A: "); std::fgets(ch.A, sizeof(ch.A), stdin); chomp_line(ch.A);
-            printf("Phuong an B: "); std::fgets(ch.B, sizeof(ch.B), stdin); chomp_line(ch.B);
-            printf("Phuong an C: "); std::fgets(ch.C, sizeof(ch.C), stdin); chomp_line(ch.C);
-            printf("Phuong an D: "); std::fgets(ch.D, sizeof(ch.D), stdin); chomp_line(ch.D);
+            printf("Phuong an A: ");
+            std::fgets(ch.A, sizeof(ch.A), stdin); chomp_line(ch.A);
+            if (is_blank_str(ch.A)) {
+                printf("Loi: Phuong an A khong duoc rong hoac chi co khoang trang.\n");
+                system("pause");
+                continue;
+            }
+
+            printf("Phuong an B: ");
+            std::fgets(ch.B, sizeof(ch.B), stdin); chomp_line(ch.B);
+            if (is_blank_str(ch.B)) {
+                printf("Loi: Phuong an B khong duoc rong hoac chi co khoang trang.\n");
+                system("pause");
+                continue;
+            }
+
+            printf("Phuong an C: ");
+            std::fgets(ch.C, sizeof(ch.C), stdin); chomp_line(ch.C);
+            if (is_blank_str(ch.C)) {
+                printf("Loi: Phuong an C khong duoc rong hoac chi co khoang trang.\n");
+                system("pause");
+                continue;
+            }
+
+            printf("Phuong an D: ");
+            std::fgets(ch.D, sizeof(ch.D), stdin); chomp_line(ch.D);
+            if (is_blank_str(ch.D)) {
+                printf("Loi: Phuong an D khong duoc rong hoac chi co khoang trang.\n");
+                system("pause");
+                continue;
+            }
 
             char dd[8];
             do {
@@ -1189,9 +1229,11 @@ static void menu_quanly_cauhoi() {
             int id = std::atoi(idbuf);
 
             PTRCH q = mh->data.FirstCHT;
-            while (q && q->data.id != id) q = q->next;
-
             char detail[128];
+            if (q) {
+                while (q && q->data.id != id) q = q->next;
+            }
+
             if (q) {
                 char noidung_short[40];
                 std::snprintf(noidung_short, sizeof(noidung_short), "%.35s%s",

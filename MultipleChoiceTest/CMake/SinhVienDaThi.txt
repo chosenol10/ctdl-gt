@@ -1,44 +1,4 @@
 2
-N24DECE043
-4
-123
-101757
-dap an la
-a
-b
-c
-d
-C
-C
-123
-126297
-cpp la ngon ngu lap trinh
-c++
-python
-js
-html/css
-A
-A
-123
-113945
-1 + 1 =
-2
-3
-4
-5
-A
-A
-123
-102025
-2 + 2 =
-1
-2
-3
-4
-D
-D
-4
-10.0
 N24DECE019
 4
 123
@@ -77,5 +37,45 @@ c
 d
 C
 C
+4
+10.0
+N24DECE043
+4
+123
+101757
+dap an la
+a
+b
+c
+d
+C
+C
+123
+126297
+cpp la ngon ngu lap trinh
+c++
+python
+js
+html/css
+A
+A
+123
+113945
+1 + 1 =
+2
+3
+4
+5
+A
+A
+123
+102025
+2 + 2 =
+1
+2
+3
+4
+D
+D
 4
 10.0
