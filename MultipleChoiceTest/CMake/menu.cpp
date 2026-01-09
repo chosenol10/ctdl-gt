@@ -1,4 +1,7 @@
 // menu.cpp (da toi uu: UX + AUTO-SAVE + UNDO + SORT + validate input + chan nhap toan space)
+// + NEW: Global Auto-Increment Question ID (khong random, khong check tung lan)
+// + NEW: Chan dap an trung nhau (2/3/4 dap an trung deu KHONG cho luu)
+
 #include "menu.h"
 #include "fileio.h"
 #include "ds_ops.h"
@@ -13,6 +16,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <windows.h> // Sleep
 
 // --------------------------------------------------
 // Duong dan file TXT chinh
@@ -23,6 +27,9 @@ static const char* PATH_MON   = "MonHoc.txt";
 static const char* PATH_CH    = "CauHoi.txt";
 static const char* PATH_SVDT  = "SinhVienDaThi.txt";
 
+// NEW: meta ID cau hoi (de ID khong bao gio bi "lui" khi xoa cau hoi)
+static const char* PATH_QID      = "QuestionId.meta";
+
 // --------------------------------------------------
 // Duong dan file snapshot (UNDO)
 // --------------------------------------------------
@@ -31,6 +38,9 @@ static const char* PATH_SV_BAK    = "SinhVien.bak";
 static const char* PATH_MON_BAK   = "MonHoc.bak";
 static const char* PATH_CH_BAK    = "CauHoi.bak";
 static const char* PATH_SVDT_BAK  = "SinhVienDaThi.bak";
+
+// NEW: snapshot meta ID
+static const char* PATH_QID_BAK   = "QuestionId.bak";
 
 // --------------------------------------------------
 // Bien trang thai toan cuc
@@ -41,9 +51,136 @@ static PTRExamLog g_logs          = NULL;
 static bool       g_exit_app      = false;
 static bool       g_has_undo_snap = false;   // da co snapshot cho Undo chua
 
+// NEW: next question id (global auto-increment)
+static int        g_next_qid      = 1;
+
 // Mo ta lan thao tac gan nhat (de show khi Undo)
 static char g_last_op_title[64]   = "";
 static char g_last_op_detail[128] = "";
+
+// ================== ID CAU HOI (GLOBAL AUTO-INCREMENT) ==================
+
+static int max_id_in_question_list(PTRCH first) {
+    int mx = 0;
+    for (PTRCH p = first; p; p = p->next) {
+        if (p->data.id > mx) mx = p->data.id;
+    }
+    return mx;
+}
+
+static int max_id_in_all_subjects(PTRMH root) {
+    if (!root) return 0;
+    int mxL = max_id_in_all_subjects(root->left);
+    int mxR = max_id_in_all_subjects(root->right);
+    int mxM = max_id_in_question_list(root->data.FirstCHT);
+    int mx = mxL;
+    if (mxM > mx) mx = mxM;
+    if (mxR > mx) mx = mxR;
+    return mx;
+}
+
+static bool load_qid_meta(const char* path) {
+    FILE* f = std::fopen(path, "r");
+    if (!f) return false;
+    long long v = 0;
+    int ok = std::fscanf(f, "%lld", &v);
+    std::fclose(f);
+    if (ok != 1) return false;
+    if (v < 1 || v > 2000000000LL) return false;
+    g_next_qid = (int)v;
+    return true;
+}
+
+static bool save_qid_meta(const char* path) {
+    FILE* f = std::fopen(path, "w");
+    if (!f) return false;
+    std::fprintf(f, "%d\n", g_next_qid);
+    std::fclose(f);
+    return true;
+}
+
+// Neu meta bi mat/hong -> quet max 1 lan luc load (O(tong so cau hoi) 1 lan)
+static void sync_qid_from_data_if_needed() {
+    int mx = max_id_in_all_subjects(g_rootMH);
+    if (mx < 0) mx = 0;
+    if (g_next_qid <= mx) g_next_qid = mx + 1;
+    if (g_next_qid < 1) g_next_qid = 1;
+}
+
+// Phat ID O(1), KHONG check tung lan
+static int new_question_id_auto() {
+    int id = g_next_qid;
+    // tranh overflow vo ly
+    if (g_next_qid < 2000000000) g_next_qid++;
+    return id;
+}
+
+// ================== CHAN DAP AN TRUNG NHAU ==================
+
+static void trim_local(char* s) {
+    if (!s) return;
+    int n = (int)std::strlen(s);
+    int l = 0;
+    while (l < n && (s[l] == ' ' || s[l] == '\t' || s[l] == '\r' || s[l] == '\n')) l++;
+    int r = n - 1;
+    while (r >= l && (s[r] == ' ' || s[r] == '\t' || s[r] == '\r' || s[r] == '\n')) r--;
+    int k = 0;
+    for (int i = l; i <= r; ++i) s[k++] = s[i];
+    s[k] = '\0';
+}
+
+static void squeeze_spaces_local(char* s) {
+    if (!s) return;
+    int n = (int)std::strlen(s);
+    int k = 0;
+    bool in_space = false;
+    for (int i = 0; i < n; ++i) {
+        char c = s[i];
+        bool isSpace = (c == ' ' || c == '\t');
+        if (isSpace) {
+            if (!in_space) {
+                s[k++] = ' ';
+                in_space = true;
+            }
+        } else {
+            s[k++] = c;
+            in_space = false;
+        }
+    }
+    s[k] = '\0';
+}
+
+static bool is_blank_str(const char* s) {
+    if (!s) return true;
+    for (const char* p = s; *p; ++p) {
+        if (*p != ' ' && *p != '\t') return false;
+    }
+    return true;
+}
+
+static void normalize_answer(char* s) {
+    if (!s) return;
+    trim_local(s);
+    squeeze_spaces_local(s);
+    // sau normalize ma rong -> coi nhu blank
+}
+
+static bool answers_all_distinct(char* A, char* B, char* C, char* D) {
+    normalize_answer(A);
+    normalize_answer(B);
+    normalize_answer(C);
+    normalize_answer(D);
+
+    if (is_blank_str(A) || is_blank_str(B) || is_blank_str(C) || is_blank_str(D)) return false;
+
+    if (su_stricmp(A, B) == 0) return false;
+    if (su_stricmp(A, C) == 0) return false;
+    if (su_stricmp(A, D) == 0) return false;
+    if (su_stricmp(B, C) == 0) return false;
+    if (su_stricmp(B, D) == 0) return false;
+    if (su_stricmp(C, D) == 0) return false;
+    return true;
+}
 
 // ================== Luu / nap toan bo ==================
 
@@ -53,6 +190,10 @@ static void save_all() {
     if (!ghi_monhoc_txt(PATH_MON, g_rootMH))        printf("Loi ghi %s\n", PATH_MON);
     if (!ghi_cauhoi_txt(PATH_CH, g_rootMH))         printf("Loi ghi %s\n", PATH_CH);
     if (!ghi_sinhvien_dathi_txt(PATH_SVDT, g_logs)) printf("Loi ghi %s\n", PATH_SVDT);
+
+    // NEW: luu next question id
+    if (!save_qid_meta(PATH_QID))                   printf("Loi ghi %s\n", PATH_QID);
+
     printf("Da luu du lieu.\n");
 }
 
@@ -66,6 +207,16 @@ static void load_all() {
     doc_sinhvien_txt(PATH_SV, g_dslop);
     doc_monhoc_txt(PATH_MON, g_rootMH);
     doc_cauhoi_txt(PATH_CH, g_rootMH);
+
+    // NEW: load meta next id, neu khong co thi quet max 1 lan
+    if (!load_qid_meta(PATH_QID)) {
+        g_next_qid = max_id_in_all_subjects(g_rootMH) + 1;
+        if (g_next_qid < 1) g_next_qid = 1;
+        save_qid_meta(PATH_QID);
+    } else {
+        sync_qid_from_data_if_needed();
+    }
+
     doc_sinhvien_dathi_txt(PATH_SVDT, g_logs, g_dslop);
 }
 
@@ -87,10 +238,12 @@ static bool save_undo_snapshot() {
     ok &= ghi_cauhoi_txt(PATH_CH_BAK, g_rootMH);
     ok &= ghi_sinhvien_dathi_txt(PATH_SVDT_BAK, g_logs);
 
+    // NEW: snapshot next id
+    ok &= save_qid_meta(PATH_QID_BAK);
+
     if (!ok) {
         printf("Canh bao: Khong tao duoc du lieu hoan tac.\n");
         printf("Lenh Undo co the khong dung duoc cho lan thay doi nay.\n");
-        // khong xoa snapshot cu neu dang co
     } else {
         g_has_undo_snap = true;
     }
@@ -113,6 +266,16 @@ static bool undo_last_change_raw() {
     ok &= doc_sinhvien_txt(PATH_SV_BAK, g_dslop);
     ok &= doc_monhoc_txt(PATH_MON_BAK, g_rootMH);
     ok &= doc_cauhoi_txt(PATH_CH_BAK, g_rootMH);
+
+    // NEW: restore next id (neu bak khong co thi quet max 1 lan)
+    if (!load_qid_meta(PATH_QID_BAK)) {
+        g_next_qid = max_id_in_all_subjects(g_rootMH) + 1;
+        if (g_next_qid < 1) g_next_qid = 1;
+        save_qid_meta(PATH_QID_BAK);
+    } else {
+        sync_qid_from_data_if_needed();
+    }
+
     ok &= doc_sinhvien_dathi_txt(PATH_SVDT_BAK, g_logs, g_dslop);
 
     if (ok) {
@@ -148,7 +311,6 @@ static void menu_undo_action() {
 
     if (undo_last_change_raw()) {
         printf("Hoan tac thanh cong.\n");
-        // Undo cung xem nhu 1 thay doi -> Auto save
         save_all();
     } else {
         printf("Hoan tac that bai (co the file *.bak da bi xoa/hong).\n");
@@ -169,7 +331,6 @@ static int wait_key() {
 }
 
 // Helper doc so nguyen tu stdin, co thong bao loi chung
-// return true neu doc OK, false neu nhap sai (da in thong bao + pause)
 static bool read_int(const char* prompt, int& out) {
     printf("%s", prompt);
     if (std::scanf("%d", &out) != 1) {
@@ -179,18 +340,6 @@ static bool read_int(const char* prompt, int& out) {
         return false;
     }
     while (getchar() != '\n'); // an newline
-    return true;
-}
-
-// Kiem tra chuoi rong hoac chi gom khoang trang/tab
-// Độ phức tạp: O(len)
-static bool is_blank_str(const char* s) {
-    if (!s) return true;
-    for (const char* p = s; *p; ++p) {
-        if (*p != ' ' && *p != '\t') {
-            return false;
-        }
-    }
     return true;
 }
 
@@ -231,8 +380,6 @@ static void quicksort_lop(Lop** arr, int left, int right) {
     if (i < right) quicksort_lop(arr, i, right);
 }
 
-// build mang Lop* da sort theo MALOP
-// tra ve so luong; neu 0 thi arr = nullptr
 static int build_sorted_lop_array(const DS_Lop& ds, Lop**& arr) {
     arr = nullptr;
     if (ds.n <= 0) return 0;
@@ -246,7 +393,6 @@ static int build_sorted_lop_array(const DS_Lop& ds, Lop**& arr) {
     return n;
 }
 
-// tim index (trong g_dslop.nodes) cua Lop* (de giu nguyen giao dien ham chon lop)
 static int find_lop_index(const DS_Lop& ds, Lop* target) {
     for (int i = 0; i < ds.n; ++i) {
         if (ds.nodes[i] == target) return i;
@@ -335,7 +481,6 @@ static int chon_lop_index_tu_bang() {
 
 // ================== Helpers: SORT sinh vien trong 1 lop ==================
 
-// Lay tu cuoi cung trong chuoi (ten goi)
 static void get_last_word(const char* src, char* dst, int dstSize) {
     if (!src || dstSize <= 0) {
         if (dstSize > 0) dst[0] = '\0';
@@ -345,7 +490,6 @@ static void get_last_word(const char* src, char* dst, int dstSize) {
     int len = (int)su_strlen(src);
     int end = len - 1;
 
-    // bo khoang trang cuoi
     while (end >= 0 && src[end] == ' ') end--;
     if (end < 0) {
         dst[0] = '\0';
@@ -354,7 +498,7 @@ static void get_last_word(const char* src, char* dst, int dstSize) {
 
     int start = end;
     while (start >= 0 && src[start] != ' ') start--;
-    start++; // sau dau space
+    start++;
 
     int copyLen = end - start + 1;
     if (copyLen >= dstSize) copyLen = dstSize - 1;
@@ -364,7 +508,6 @@ static void get_last_word(const char* src, char* dst, int dstSize) {
     dst[copyLen] = '\0';
 }
 
-// so sanh 2 SV theo "ten goi" (tu cuoi), tiep theo HO TEN day du, cuoi cung MASV
 static int cmp_sv_by_name(PTRSV a, PTRSV b) {
     char fullA[128], fullB[128];
     std::snprintf(fullA, sizeof(fullA), "%s %s", a->data.ho, a->data.ten);
@@ -406,7 +549,6 @@ static void quicksort_sv(PTRSV *arr, int left, int right) {
     if (i < right) quicksort_sv(arr, i, right);
 }
 
-// build mang SV da sort theo TEN goi / HO / MASV
 static int build_sorted_sv_array(Lop *lop, PTRSV *&arr) {
     arr = nullptr;
     if (!lop || !lop->FirstSV) return 0;
@@ -424,7 +566,6 @@ static int build_sorted_sv_array(Lop *lop, PTRSV *&arr) {
     return n;
 }
 
-// kiem tra MASV da ton tai trong toan he thong (case-insensitive)
 static bool masv_exists_in_system(const char* masv_ci) {
     for (int i = 0; i < g_dslop.n; ++i) {
         Lop* lop = g_dslop.nodes[i];
@@ -566,7 +707,6 @@ static void print_ds_monhoc_overview(PTRMH root) {
     delete[] arr;
 }
 
-// Chon mon tu cay bang STT, tra mamh vao mamh_out, return true neu OK
 static bool chon_monhoc_tu_cay(PTRMH root, char* mamh_out) {
     if (!root) {
         printf("\nChua co mon hoc nao. Hay them mon truoc.\n");
@@ -716,7 +856,6 @@ static void menu_quanly_lop() {
                 continue;
             }
 
-            // Snapshot truoc khi them
             save_undo_snapshot();
 
             int r = them_lop(g_dslop, ml, tl);
@@ -800,7 +939,6 @@ static void menu_quanly_sv() {
             return;
         }
 
-        // --- 1. Nhap SV vao lop ---
         if (key == '1') {
             int idxLop = chon_lop_index_tu_bang();
             if (idxLop < 0) continue;
@@ -859,7 +997,6 @@ static void menu_quanly_sv() {
                 continue;
             }
 
-            // Snapshot truoc khi them SV
             save_undo_snapshot();
 
             int r = them_sv_vao_ds(g_dslop, lop->malop, ms, ho, ten, phai, pw);
@@ -885,7 +1022,6 @@ static void menu_quanly_sv() {
             }
             system("pause");
         }
-        // --- 2. Sua SV ---
         else if (key == '2') {
             int idxLop = chon_lop_index_tu_bang();
             if (idxLop < 0) continue;
@@ -894,7 +1030,6 @@ static void menu_quanly_sv() {
             PTRSV sv = chon_sv_trong_lop(lop);
             if (!sv) continue;
 
-            // Luu gia tri cu de mo ta
             char ho_cu[128], ten_cu[64], phai_cu[16];
             su_strcpy(ho_cu,   sv->data.ho);
             su_strcpy(ten_cu,  sv->data.ten);
@@ -943,7 +1078,6 @@ static void menu_quanly_sv() {
             }
             system("pause");
         }
-        // --- 3. Xoa SV ---
         else if (key == '3') {
             int idxLop = chon_lop_index_tu_bang();
             if (idxLop < 0) continue;
@@ -973,7 +1107,6 @@ static void menu_quanly_sv() {
             }
             system("pause");
         }
-        // --- 4. In SV cua lop ---
         else if (key == '4') {
             int idxLop = chon_lop_index_tu_bang();
             if (idxLop < 0) continue;
@@ -1152,7 +1285,8 @@ static void menu_quanly_cauhoi() {
             save_undo_snapshot();
 
             CauHoi ch;
-            ch.id = new_question_id_unique(g_rootMH);
+            // NEW: O(1) phat ID khong check
+            ch.id = new_question_id_auto();
 
             printf("\nNhap noi dung cau hoi:\n");
             std::fgets(ch.noidung, sizeof(ch.noidung), stdin); chomp_line(ch.noidung);
@@ -1162,36 +1296,27 @@ static void menu_quanly_cauhoi() {
                 continue;
             }
 
-            printf("Phuong an A: ");
-            std::fgets(ch.A, sizeof(ch.A), stdin); chomp_line(ch.A);
-            if (is_blank_str(ch.A)) {
-                printf("Loi: Phuong an A khong duoc rong hoac chi co khoang trang.\n");
-                system("pause");
-                continue;
-            }
+            // NEW: bat buoc 4 dap an KHAC NHAU (2/3/4 trung deu chan)
+            while (true) {
+                printf("Phuong an A: ");
+                std::fgets(ch.A, sizeof(ch.A), stdin); chomp_line(ch.A);
 
-            printf("Phuong an B: ");
-            std::fgets(ch.B, sizeof(ch.B), stdin); chomp_line(ch.B);
-            if (is_blank_str(ch.B)) {
-                printf("Loi: Phuong an B khong duoc rong hoac chi co khoang trang.\n");
-                system("pause");
-                continue;
-            }
+                printf("Phuong an B: ");
+                std::fgets(ch.B, sizeof(ch.B), stdin); chomp_line(ch.B);
 
-            printf("Phuong an C: ");
-            std::fgets(ch.C, sizeof(ch.C), stdin); chomp_line(ch.C);
-            if (is_blank_str(ch.C)) {
-                printf("Loi: Phuong an C khong duoc rong hoac chi co khoang trang.\n");
-                system("pause");
-                continue;
-            }
+                printf("Phuong an C: ");
+                std::fgets(ch.C, sizeof(ch.C), stdin); chomp_line(ch.C);
 
-            printf("Phuong an D: ");
-            std::fgets(ch.D, sizeof(ch.D), stdin); chomp_line(ch.D);
-            if (is_blank_str(ch.D)) {
-                printf("Loi: Phuong an D khong duoc rong hoac chi co khoang trang.\n");
-                system("pause");
-                continue;
+                printf("Phuong an D: ");
+                std::fgets(ch.D, sizeof(ch.D), stdin); chomp_line(ch.D);
+
+                if (!answers_all_distinct(ch.A, ch.B, ch.C, ch.D)) {
+                    printf("\nLoi: 4 dap an phai KHAC nhau va khong duoc rong.\n");
+                    printf("Chi can 2 dap an trung (VD: A=4, B=4) la BI CHAN.\n");
+                    printf("Vui long nhap lai 4 dap an!\n\n");
+                    continue;
+                }
+                break;
             }
 
             char dd[8];
@@ -1300,8 +1425,7 @@ static void menu_thi_sv() {
 
     char tms[16]; su_strncpy(tms, ms, 16); normalize_code(tms);
 
-    // Tim SV
-    PTRSV sv = NULL; 
+    PTRSV sv = NULL;
     Lop* lop = NULL;
     bool foundMasv = false;
 
@@ -1482,7 +1606,6 @@ void run_console_app() {
 
         int key = wait_key();
 
-        // ESC hoac 3 => THOAT CHUONG TRINH + AUTO-SAVE
         if (key == KEY_ESC || key == '3') {
             handle_esc_exit();
             break;
@@ -1499,13 +1622,12 @@ void run_console_app() {
                 printf("Sai tai khoan hoac mat khau GV (mac dinh: GV / GV).\n");
                 system("pause");
             }
-        } 
+        }
         else if (key == '2') {
             menu_thi_sv();
-        } 
+        }
     }
 
-    // Don dep
     free_ds_lop(g_dslop);
     free_all_monhoc(g_rootMH);
     free_examlog(g_logs);

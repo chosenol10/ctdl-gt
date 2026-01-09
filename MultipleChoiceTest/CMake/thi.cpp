@@ -484,7 +484,7 @@ int thuc_hien_thi(DS_Lop& ds, PTRMH root, PTRExamLog& logs,
         } else {
             if (key >= 'a' && key <= 'z') key = key - 'a' + 'A';
             if (key == 'M') {
-                mark[cur] = !mark[cur];   // danh dau / bo danh dau
+                mark[cur] = !mark[cur];   // d         anh dau / bo danh dau
                 changed = true;
             } else if (key == 'A' || key == 'B' || key == 'C' || key == 'D') {
                 if (items[cur].da_chon != (char)key) {
