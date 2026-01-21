@@ -1,9 +1,12 @@
-8
+11
 113945, 123, 1 + 1 =, 2, 3, 4, 5, A
 101757, 123, dap an la, a, b, c, d, C
 126297, 123, cpp la ngon ngu lap trinh, c++, python, js, html/css, A
 102025, 123, 2 + 2 =, 1, 2, 3, 4, D
 126298, 123, 10 + 25 = ?, 41, 12, 35, 23, C
 126300, 123, 1 + 99 = ?, 100, 200, 300, 400, A
+126303, 123, clear la:, sach, do, ban, rac, A
 105667, SKD1101, 2 + 1 =, 1, 2, 3, 4, C
 126301, SKD1101, cho a b c vay chu cai tiep theo la ?, d, e, f, g, A
+126302, SKD1101, ky nang thuyet trinh la 1 mon, ky nang mem, ky nang cung, chuyen nganh, khong biet, A
+1810899509, TRR01, ky hieu ^ la, tuyen, giao, hop, phoi, A

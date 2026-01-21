@@ -1,44 +1,5 @@
 4
 N24DECE019
-1
-SKD1101
-105667
-2 + 1 =
-1
-2
-3
-4
-C
-C
-1
-10.0
-N24DECE043
-1
-SKD1101
-105667
-2 + 1 =
-1
-2
-3
-4
-C
-D
-0
-0.0
-N24DECE043
-1
-123
-126297
-cpp la ngon ngu lap trinh
-c++
-python
-js
-html/css
-A
-A
-1
-10.0
-N24DECE019
 3
 123
 113945
@@ -69,3 +30,51 @@ D
 A
 0
 0.0
+N24DECE043
+1
+123
+126297
+cpp la ngon ngu lap trinh
+c++
+python
+js
+html/css
+A
+A
+1
+10.0
+N24DECE043
+2
+SKD1101
+105667
+2 + 1 =
+1
+2
+3
+4
+C
+C
+SKD1101
+126301
+cho a b c vay chu cai tiep theo la ?
+d
+e
+f
+g
+A
+A
+2
+10.0
+N24DECE019
+1
+SKD1101
+105667
+2 + 1 =
+1
+2
+3
+4
+C
+C
+1
+10.0

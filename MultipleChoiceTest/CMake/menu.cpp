@@ -1,5 +1,5 @@
 // menu.cpp (da toi uu: UX + AUTO-SAVE + UNDO + SORT + validate input + chan nhap toan space)
-// + NEW: Global Auto-Increment Question ID (khong random, khong check tung lan)
+// + NEW: Global Auto-Increment Question ID (O(1) counter) NHUNG ID xuat ra "nhin ngau nhien" bang hoan vi 1-1 (khong trung, khong check tung lan)
 // + NEW: Chan dap an trung nhau (2/3/4 dap an trung deu KHONG cho luu)
 
 #include "menu.h"
@@ -16,6 +16,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstdint>
 #include <windows.h> // Sleep
 
 // --------------------------------------------------
@@ -51,42 +52,159 @@ static PTRExamLog g_logs          = NULL;
 static bool       g_exit_app      = false;
 static bool       g_has_undo_snap = false;   // da co snapshot cho Undo chua
 
-// NEW: next question id (global auto-increment)
+// NEW: next question counter (global auto-increment O(1))
 static int        g_next_qid      = 1;
 
 // Mo ta lan thao tac gan nhat (de show khi Undo)
 static char g_last_op_title[64]   = "";
 static char g_last_op_detail[128] = "";
 
-// ================== ID CAU HOI (GLOBAL AUTO-INCREMENT) ==================
+// ================================================================
+// ================== ID CAU HOI (COUNTER + HOAN VI 1-1) ===========
+// ================================================================
+//
+// Yeu cau: ID "nhin ngau nhien", KHONG check trung tung lan, O(1) cap phat.
+// Giai phap: tao ID = encode(counter) voi encode la phep hoan vi 1-1 tren 1 tap so.
+// -> counter tang dan => ID khong bao gio trung.
+// -> decode(ID) cho ra counter de quet phuc hoi g_next_qid neu mat meta.
+//
+// De tranh va cham voi du lieu cu (neu truoc day id=1,2,3...):
+// reserve 1..1,000,000 cho legacy. ID moi luon > reserve.
+//
+// ID moi nam trong [RESERVE+1 .. 2147483646] (fit int).
+//
 
-static int max_id_in_question_list(PTRCH first) {
+static const int64_t QID_PRIME   = 2147483647LL;   // 2^31-1 (prime)
+static const int64_t QID_RESERVE = 1000000LL;      // giu vung id nho cho legacy
+static const int64_t QID_RANGE   = QID_PRIME - QID_RESERVE - 1; // so phan tu vung id moi
+
+// Linear congruential permutation parameters (can gcd(A, QID_RANGE)=1)
+static const int64_t QID_A = 1103515245LL;
+static const int64_t QID_B = 12345LL;
+
+// normalize modulo (luon ra [0..m-1])
+static int64_t mod_norm(int64_t x, int64_t m) {
+    x %= m;
+    if (x < 0) x += m;
+    return x;
+}
+
+// extended gcd: return gcd(a,b), and outputs x,y such that ax+by=g
+static int64_t egcd(int64_t a, int64_t b, int64_t &x, int64_t &y) {
+    if (b == 0) {
+        x = 1; y = 0;
+        return a;
+    }
+    int64_t x1=0, y1=0;
+    int64_t g = egcd(b, a % b, x1, y1);
+    x = y1;
+    y = x1 - (a / b) * y1;
+    return g;
+}
+
+// modular inverse: a^-1 mod m (assumes gcd(a,m)=1)
+static int64_t modinv(int64_t a, int64_t m) {
+    int64_t x=0, y=0;
+    int64_t g = egcd(a, m, x, y);
+    if (g != 1 && g != -1) return -1;
+    x %= m;
+    if (x < 0) x += m;
+    return x;
+}
+
+static int64_t QID_A_INV = -1;
+
+// encode counter -> id
+// counter in [1..QID_RANGE]  (we map counter-1 in [0..QID_RANGE-1])
+static int qid_encode(int counter) {
+    if (counter < 1) counter = 1;
+    if ((int64_t)counter > QID_RANGE) counter = (int)QID_RANGE;
+
+    int64_t c = (int64_t)counter - 1; // 0..range-1
+    int64_t x = (QID_A * c + QID_B) % QID_RANGE; // 0..range-1
+    int64_t id = (QID_RESERVE + 1) + x;          // reserve+1 .. reserve+range
+    if (id < 1) id = 1;
+    if (id > 2147483646LL) id = 2147483646LL;
+    return (int)id;
+}
+
+// decode id -> counter
+// if id <= reserve: legacy, return 0 (khong tinh vao counter moi)
+// else counter = (invA * (x - B) mod range) + 1
+static int qid_decode_to_counter(int id) {
+    if (id <= (int)QID_RESERVE) return 0; // legacy range
+    int64_t x = (int64_t)id - (QID_RESERVE + 1); // 0..range-1 (neu hop le)
+    x = mod_norm(x, QID_RANGE);
+
+    int64_t t = mod_norm(x - QID_B, QID_RANGE);
+    if (QID_A_INV < 0) return 0;
+
+    int64_t c = (QID_A_INV * t) % QID_RANGE; // 0..range-1
+    int64_t counter = c + 1;                 // 1..range
+    if (counter < 1) counter = 1;
+    if (counter > QID_RANGE) counter = QID_RANGE;
+    return (int)counter;
+}
+
+// init inverse (call once)
+static void qid_init_once() {
+    if (QID_A_INV >= 0) return;
+    QID_A_INV = modinv(QID_A, QID_RANGE);
+    if (QID_A_INV < 0) {
+        // fallback an toan (khong nen xay ra vi gcd(A,range)=1)
+        QID_A_INV = 1;
+    }
+}
+
+// quet danh sach cau hoi 1 mon -> tim max counter cua scheme moi
+static int max_counter_in_question_list(PTRCH first) {
     int mx = 0;
     for (PTRCH p = first; p; p = p->next) {
-        if (p->data.id > mx) mx = p->data.id;
+        int c = qid_decode_to_counter(p->data.id);
+        if (c > mx) mx = c;
     }
     return mx;
 }
 
-static int max_id_in_all_subjects(PTRMH root) {
+// quet tat ca mon (AVL) -> tim max counter cua scheme moi
+static int max_counter_in_all_subjects(PTRMH root) {
     if (!root) return 0;
-    int mxL = max_id_in_all_subjects(root->left);
-    int mxR = max_id_in_all_subjects(root->right);
-    int mxM = max_id_in_question_list(root->data.FirstCHT);
+    int mxL = max_counter_in_all_subjects(root->left);
+    int mxR = max_counter_in_all_subjects(root->right);
+    int mxM = max_counter_in_question_list(root->data.FirstCHT);
     int mx = mxL;
     if (mxM > mx) mx = mxM;
     if (mxR > mx) mx = mxR;
     return mx;
 }
 
+// Meta file: ho tro 2 format
+// 1) cu: "<nextCounter>"
+// 2) moi: "v2 <nextCounter>"
 static bool load_qid_meta(const char* path) {
     FILE* f = std::fopen(path, "r");
     if (!f) return false;
+
+    char tag[16] = {0};
     long long v = 0;
-    int ok = std::fscanf(f, "%lld", &v);
-    std::fclose(f);
-    if (ok != 1) return false;
-    if (v < 1 || v > 2000000000LL) return false;
+
+    int c = std::fscanf(f, "%15s", tag);
+    if (c != 1) { std::fclose(f); return false; }
+
+    if (tag[0] == 'v' || tag[0] == 'V') {
+        // format moi: v2 <num>
+        int ok = std::fscanf(f, "%lld", &v);
+        std::fclose(f);
+        if (ok != 1) return false;
+    } else {
+        // format cu: tag chinh la so
+        v = std::atoll(tag);
+        std::fclose(f);
+    }
+
+    if (v < 1) v = 1;
+    if (v > QID_RANGE) v = QID_RANGE;
+
     g_next_qid = (int)v;
     return true;
 }
@@ -94,24 +212,39 @@ static bool load_qid_meta(const char* path) {
 static bool save_qid_meta(const char* path) {
     FILE* f = std::fopen(path, "w");
     if (!f) return false;
-    std::fprintf(f, "%d\n", g_next_qid);
+    // ghi format moi de ro rang scheme
+    std::fprintf(f, "v2 %d\n", g_next_qid);
     std::fclose(f);
     return true;
 }
 
 // Neu meta bi mat/hong -> quet max 1 lan luc load (O(tong so cau hoi) 1 lan)
 static void sync_qid_from_data_if_needed() {
-    int mx = max_id_in_all_subjects(g_rootMH);
-    if (mx < 0) mx = 0;
-    if (g_next_qid <= mx) g_next_qid = mx + 1;
+    int mxCounter = max_counter_in_all_subjects(g_rootMH);
+    if (mxCounter < 0) mxCounter = 0;
+
+    // next counter phai > max counter da dung
+    if (g_next_qid <= mxCounter) g_next_qid = mxCounter + 1;
+
     if (g_next_qid < 1) g_next_qid = 1;
+    if ((int64_t)g_next_qid > QID_RANGE) g_next_qid = (int)QID_RANGE;
 }
 
-// Phat ID O(1), KHONG check tung lan
+// Phat ID O(1), KHONG check tung lan.
+// return: ID "nhin ngau nhien" (encode(counter))
 static int new_question_id_auto() {
-    int id = g_next_qid;
-    // tranh overflow vo ly
-    if (g_next_qid < 2000000000) g_next_qid++;
+    qid_init_once();
+
+    int counter = g_next_qid;
+    if (counter < 1) counter = 1;
+    if ((int64_t)counter > QID_RANGE) counter = (int)QID_RANGE;
+
+    int id = qid_encode(counter);
+
+    // tang counter (khong wrap de tranh trung)
+    if ((int64_t)g_next_qid < QID_RANGE) g_next_qid++;
+    else g_next_qid = (int)QID_RANGE;
+
     return id;
 }
 
@@ -191,13 +324,15 @@ static void save_all() {
     if (!ghi_cauhoi_txt(PATH_CH, g_rootMH))         printf("Loi ghi %s\n", PATH_CH);
     if (!ghi_sinhvien_dathi_txt(PATH_SVDT, g_logs)) printf("Loi ghi %s\n", PATH_SVDT);
 
-    // NEW: luu next question id
+    // NEW: luu next question counter (scheme v2)
     if (!save_qid_meta(PATH_QID))                   printf("Loi ghi %s\n", PATH_QID);
 
     printf("Da luu du lieu.\n");
 }
 
 static void load_all() {
+    qid_init_once();
+
     free_ds_lop(g_dslop);
     free_all_monhoc(g_rootMH);
     free_examlog(g_logs);
@@ -208,10 +343,11 @@ static void load_all() {
     doc_monhoc_txt(PATH_MON, g_rootMH);
     doc_cauhoi_txt(PATH_CH, g_rootMH);
 
-    // NEW: load meta next id, neu khong co thi quet max 1 lan
+    // NEW: load meta next counter, neu khong co thi quet max counter 1 lan
     if (!load_qid_meta(PATH_QID)) {
-        g_next_qid = max_id_in_all_subjects(g_rootMH) + 1;
+        g_next_qid = max_counter_in_all_subjects(g_rootMH) + 1;
         if (g_next_qid < 1) g_next_qid = 1;
+        if ((int64_t)g_next_qid > QID_RANGE) g_next_qid = (int)QID_RANGE;
         save_qid_meta(PATH_QID);
     } else {
         sync_qid_from_data_if_needed();
@@ -238,7 +374,7 @@ static bool save_undo_snapshot() {
     ok &= ghi_cauhoi_txt(PATH_CH_BAK, g_rootMH);
     ok &= ghi_sinhvien_dathi_txt(PATH_SVDT_BAK, g_logs);
 
-    // NEW: snapshot next id
+    // NEW: snapshot meta next counter (scheme v2)
     ok &= save_qid_meta(PATH_QID_BAK);
 
     if (!ok) {
@@ -256,6 +392,8 @@ static bool undo_last_change_raw() {
         return false;
     }
 
+    qid_init_once();
+
     // Xoa du lieu hien tai trong RAM
     free_ds_lop(g_dslop);
     free_all_monhoc(g_rootMH);
@@ -267,10 +405,11 @@ static bool undo_last_change_raw() {
     ok &= doc_monhoc_txt(PATH_MON_BAK, g_rootMH);
     ok &= doc_cauhoi_txt(PATH_CH_BAK, g_rootMH);
 
-    // NEW: restore next id (neu bak khong co thi quet max 1 lan)
+    // NEW: restore next counter (neu bak khong co thi quet max 1 lan)
     if (!load_qid_meta(PATH_QID_BAK)) {
-        g_next_qid = max_id_in_all_subjects(g_rootMH) + 1;
+        g_next_qid = max_counter_in_all_subjects(g_rootMH) + 1;
         if (g_next_qid < 1) g_next_qid = 1;
+        if ((int64_t)g_next_qid > QID_RANGE) g_next_qid = (int)QID_RANGE;
         save_qid_meta(PATH_QID_BAK);
     } else {
         sync_qid_from_data_if_needed();
@@ -1285,7 +1424,7 @@ static void menu_quanly_cauhoi() {
             save_undo_snapshot();
 
             CauHoi ch;
-            // NEW: O(1) phat ID khong check
+            // NEW: O(1) cap phat ID (counter++) nhung "nhin ngau nhien" va KHONG TRUNG
             ch.id = new_question_id_auto();
 
             printf("\nNhap noi dung cau hoi:\n");
